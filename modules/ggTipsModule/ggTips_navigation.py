@@ -235,6 +235,9 @@ def show_ggtips_sidebar_filters(data: dict):
 
         selected_companies = st.multiselect("Companies", company_values, key="companyFilter")
 
+        if selected_companies:
+            mergedTips = mergedTips[mergedTips['company'].isin(selected_companies)]
+
         colA, colB = st.columns(2)
 
         with colA:
@@ -403,7 +406,6 @@ def show_ggtips_sidebar_filters(data: dict):
         pass
     # 8. Применяем новые фильтры
     if selected_companies:
-        companies = companies[companies['company'].isin(selected_companies)]
         partners = partners[partners['company'].isin(selected_companies)]
 
     if selected_regions and 'region' in mergedTips.columns:
