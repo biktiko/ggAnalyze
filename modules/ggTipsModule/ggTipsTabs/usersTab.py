@@ -26,7 +26,7 @@ def show(data: dict | None = None) -> None:
         thresh = st.slider(
             "Minimum total per user",
             min_value=0.0,
-            max_value=float(tips["amount"].max()),
+            max_value=100.0,
             value=0.0,
             help="Скрыть пользователей с суммой/count ниже этого порога"
         )
