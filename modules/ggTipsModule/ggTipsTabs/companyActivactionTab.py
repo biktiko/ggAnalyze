@@ -180,10 +180,11 @@ def show(data: dict | None = None) -> None:
         use_container_width=True
     )
 
-    st.write(df)
 
     # 16) подробная таблица
     with st.expander("Details", expanded=False):
+        st.dataframe(df)
+        
         st.dataframe(
             df[[
                 "Company","Scope_first","Scope_second","DiffNum","DiffPercent","Days"

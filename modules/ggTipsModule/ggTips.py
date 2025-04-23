@@ -1,7 +1,7 @@
 # C:\Users\user\OneDrive\Desktop\Workspace\ggAnalyze\modules\ggTipsModule\ggTips.py
 import streamlit as st
 from modules.data_import import upload_file  # Импорт функции загрузки данных
-from modules.ggTipsModule.ggTipsTabs import CompaniesTab, allTipsTab, tablesTab, companyActivactionTab
+from modules.ggTipsModule.ggTipsTabs import CompaniesTab, allTipsTab, tablesTab, companyActivactionTab, mapsTab, companiesConnectionTab, usersTab
 
 def show(data):
     st.title("Tips Analysis")
@@ -25,16 +25,13 @@ def show(data):
         companyActivactionTab.show(data)
 
     with CompanyConnectionsTab:
-        st.write("### Company Connections Tab")
-        st.write("To be implemented...")
+       companiesConnectionTab.show(data)
 
     with MapTab:
-        st.write("### Map Tab")
-        st.write("To be implemented...")
+        mapsTab.show(data)
 
     with UsersTab:
-        st.write("### Users Tab")
-        st.write("To be implemented...")
+        usersTab.show(data)
 
     with TablesTab:
         tablesTab.show(data)

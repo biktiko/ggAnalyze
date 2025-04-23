@@ -19,7 +19,7 @@ if "data" not in st.session_state:
 # Сайдбар и основной контент (отображаются только после логина)
 
 with st.sidebar:
-    page = st.radio("Select a page", ( "Data Import", "gg", "ggTips", "ggBusiness", "Advanced"))
+    page = st.radio("Select a page", ( "Data Import", "gg", "ggTips", "ggBusiness", "Developer mode"))
     # Фильтры ggTips будем показывать, только если выбрана соответствующая страница
 
     if page == "ggTips":
@@ -37,5 +37,5 @@ elif page == "ggBusiness":
     corp_analysis.show()
 elif page == "gg":
     gg.show()
-elif page == "Advanced":
+elif page == "Developer mode":
     advanced.show()
