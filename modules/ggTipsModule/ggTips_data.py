@@ -14,8 +14,19 @@ def get_combined_tips_data(session_clever_data: dict) -> dict:
     }
     
     for file_data in session_clever_data.values():
-
         merged_tips = merge_ggTips_sheets(file_data['ggtips'])
+        # вот он — ваш архив из load_data
+
+        archive = file_data.get('partnersArchive', pd.DataFrame())
+
+        if not archive.empty:
+            merged_tips = (
+                merged_tips
+                .merge(
+                   archive,
+                   on='email', how='left'
+                )
+            )
         if not merged_tips.empty:
             combined_data['ggtips'].append(merged_tips)
    

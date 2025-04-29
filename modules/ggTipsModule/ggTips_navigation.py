@@ -3,6 +3,7 @@
 import streamlit as st
 import pandas as pd
 import re
+import math
 from modules.ggTipsModule import ggTips_data
 
 def group_by_time_interval(df: pd.DataFrame, interval: str, custom_days: int = 10) -> pd.DataFrame:
@@ -150,13 +151,32 @@ def show_ggtips_sidebar_filters(data: dict):
         filteredTips['company_unified'] = None
 
     # 4. Объединяем транзакции с данными компаний по company (left join)
-    if not companies.empty and 'company' in companies.columns:
-        companies_for_join = companies.set_index('company')
-        filteredTips.drop_duplicates(subset=['uuid'])
-        mergedTips = filteredTips.join(companies_for_join, on='company', how='left', rsuffix='_co')
-    else:
-        mergedTips = filteredTips
+    invalid_values = [None, "", "-", "nan", "null", "undefined", "N/A", "none", "not found"]
 
+    filteredTips = (
+        filteredTips
+        .assign(
+            company=lambda df: (
+                df["company_x"].replace(invalid_values, pd.NA)
+                .combine_first(df["company_y"].replace(invalid_values, pd.NA))
+            )
+        )
+        .drop(columns=["company_x", "company_y", "company_unified"], errors="ignore")
+    )
+
+    if not companies.empty and "company" in companies.columns:
+        companies_for_join = companies.set_index("company")
+        
+        filteredTips = filteredTips.drop_duplicates(subset="uuid")  # не забудь сохранить результат!
+        
+        mergedTips = filteredTips.join(
+            companies_for_join,
+            on="company",
+            how="left",
+            rsuffix="_co"
+        )
+    else:
+        mergedTips = filteredTips.copy()
 
     # 5. Готовим списки для фильтров
     company_values = list(mergedTips['company'].dropna().unique()) if 'company' in mergedTips.columns else []
@@ -284,63 +304,88 @@ def show_ggtips_sidebar_filters(data: dict):
             companies = companies[(companies['end'] >= pd.to_datetime(e_from)) &
                                     (companies['end'] <= pd.to_datetime(e_to))]
         
+        import math
+
+        mergedTips = mergedTips.drop_duplicates(subset=['uuid'])
+
+        # 1) Метрики по компаниям
         metrics = (
             mergedTips
             .groupby("company", observed=True)
             .agg(
-                Amount   = ("amount", "sum"),
-                Count    = ("uuid",   "count"),
-                LastTx   = ("date",    "max")
+                Amount = ("amount", "sum"),
+                Count  = ("uuid",   "count"),
+                LastTx = ("date",   "max"),
             )
             .reset_index()
         )
-        # приводим колонки к удобным спискам/диапазонам
-        amt_min, amt_max = int(metrics.Amount.min()), 3000000
-        cnt_min, cnt_max = int(metrics.Count.min()),  1000
+
+        # 2) Метрики по партнёрам (только если столбец partner есть)
+        if "partner" in mergedTips.columns:
+            metricsPartners = (
+                mergedTips
+                .groupby("partner", observed=True)
+                .agg(
+                    Amount = ("amount", "sum"),
+                    Count  = ("uuid",   "count"),
+                    LastTx = ("date",   "max"),
+                )
+                .reset_index()
+            )
+        else:
+            metricsPartners = pd.DataFrame(columns=["partner","Amount","Count","LastTx"])
+
+        # 3) Задаём диапазоны для слайдеров по компаниям
+        amt_min, amt_max = 0, math.ceil(metrics.Amount.max() if not metrics.empty else 0)
+        cnt_min, cnt_max = 0, math.ceil(metrics.Count.max()  if not metrics.empty else 0)
         date_min = metrics.LastTx.min().date() if not metrics.LastTx.isna().all() else None
         date_max = metrics.LastTx.max().date() if not metrics.LastTx.isna().all() else None
 
-        # st.markdown("**By company’s performance:**")
-        # amt_range = st.slider(
-        #     "Amount range",
-        #     min_value=amt_min, max_value=amt_max,
-        #     value=(amt_min, amt_max),
-        #     step=max(1, (amt_max-amt_min)//20),
-        #     key="company_amount_range"
-        # )
-        # cnt_range = st.slider(
-        #     "Count range",
-        #     min_value=cnt_min, max_value=cnt_max,
-        #     value=(cnt_min, cnt_max),
-        #     step=1,
-        #     key="company_count_range"
-        # )
-        # last_tx_range = st.date_input(
-        #     "Last tip",
-        #     value=[date_min, date_max] if date_min and date_max else [],
-        #     key="company_last_tx_range"
-        # )
+        st.markdown("**By company’s performance:**")
+        amt_range = st.slider(
+            "Amount range",
+            min_value=amt_min, max_value=amt_max,
+            value=(amt_min, amt_max),
+            step=max(1, (amt_max-amt_min)//20),
+            key="company_amount_range"
+        )
+        cnt_range = st.slider(
+            "Count range",
+            min_value=cnt_min, max_value=cnt_max,
+            value=(cnt_min, cnt_max),
+            step=1,
+            key="company_count_range"
+        )
+        last_tx_range = st.date_input(
+            "Last tip",
+            value=[date_min, date_max] if date_min and date_max else [],
+            key="company_last_tx_range"
+        )
 
-        # Применяем фильтрацию по метрикам
-        # m = metrics.copy()
-        # m = m[
-        #     (m.Amount.between(*amt_range)) &
-        #     (m.Count.between(*cnt_range))
-        # ]
-        # if len(last_tx_range) == 2:
-        #     start_d, end_d = last_tx_range
-        #     m = m[
-        #         (m.LastTx.dt.date >= start_d) &
-        #         (m.LastTx.dt.date <= end_d)
-        #     ]
-        # valid = m["company"].tolist()
+        # 4) Фильтруем компании по этим метрикам
+        m = metrics.copy()
+        m = m[(m.Amount.between(*amt_range)) & (m.Count.between(*cnt_range))]
+        if len(last_tx_range) == 2:
+            start_d, end_d = last_tx_range
+            m = m[(m.LastTx.dt.date >= start_d) & (m.LastTx.dt.date <= end_d)]
+        valid_companies = m["company"].tolist()
 
-        # mergedTips = mergedTips[mergedTips["company"].isin(valid)]
-        # companies  = companies[companies["company"].isin(valid)]
-        # partners   = partners[partners["company"].isin(valid)]
+        # 5) Фильтруем партнёров аналогично (на основе тех же слайдеров)
+        p = metricsPartners.copy()
+        p = p[(p.Amount.between(*amt_range)) & (p.Count.between(*cnt_range))]
+        if len(last_tx_range) == 2:
+            start_d, end_d = last_tx_range
+            p = p[(p.LastTx.dt.date >= start_d) & (p.LastTx.dt.date <= end_d)]
+        valid_partners = p["partner"].tolist()
 
-        # partners 
+        # 6) Применяем фильтр к mergedTips, companies и partners
+        mergedTips = mergedTips[mergedTips["company"].isin(valid_companies)]
+        companies  = companies[companies["company"].isin(valid_companies)]
+
         partners = data.get('ggtipsPartners', pd.DataFrame()).copy()
+        if "partner" in partners.columns:
+            partners = partners[partners["partner"].isin(valid_partners)]
+
         
         # Унифицируем название компании в партнёрах (аналогично транзакциям)
         if not partners.empty and 'company' in partners.columns:
@@ -363,12 +408,12 @@ def show_ggtips_sidebar_filters(data: dict):
 
             if st.session_state.get('ggPayeers') == 'Without gg teammates':
                 partners['phonenumber'] = partners['phonenumber'].astype('Int64').astype(str).str.strip()
-                ggTeammates['NUMBER'] = ggTeammates['NUMBER'].astype('Int64').astype(str).str.strip()
+                ggTeammates['NUMBER'] = ggTeammates['number'].astype('Int64').astype(str).str.strip()
                 partners = partners[~partners['phonenumber'].isin(ggTeammates['NUMBER'])]
 
             elif st.session_state.get('ggPayeers') == 'Only gg teammates':
                 partners['phonenumber'] = partners['phonenumber'].astype('Int64').astype(str).str.strip()
-                ggTeammates['NUMBER'] = ggTeammates['NUMBER'].astype('Int64').astype(str).str.strip()
+                ggTeammates['NUMBER'] = ggTeammates['number'].astype('Int64').astype(str).str.strip()
                 partners = partners[partners['phonenumber'].isin(ggTeammates['NUMBER'])]
 
         partner_values = list(partners['partner'].dropna().unique()) if 'partner' in partners.columns else []

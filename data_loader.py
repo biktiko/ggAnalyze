@@ -1,9 +1,9 @@
 # C:\Users\user\OneDrive\Desktop\Workspace\ggAnalyze\data_loader.py
 
 import os
+import logging
 import pandas as pd
 import numpy as np
-import logging
 import streamlit as st
 
 # Настройка логирования для отладки
@@ -11,9 +11,10 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Списки целевых листов (в нижнем регистре)
-ggTips_TARGET_SHEETS = {"alltips", "ggpayers", "superadmin"}
-ggTipsCompanies_TARGET_SHEETS = {"companies"}
-ggTipsPartners_TARGET_SHEETS = {"partners details"}
+ggTips_TARGET_SHEETS           = {"alltips", "ggpayers", "superadmin"}
+ggTipsCompanies_TARGET_SHEETS  = {"companies"}
+ggTipsPartners_TARGET_SHEETS   = {"partners details"}
+PARTNERS_ARCHIVE_SHEET         = {"partners archive"}   # <-- новый лист
 
 def normalize_column(col_name: str) -> str:
     """Приводит имя столбца к стандартному виду."""
@@ -21,6 +22,7 @@ def normalize_column(col_name: str) -> str:
 
 def standardize_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Стандартизирует имена столбцов."""
+    df = df.copy()
     df.columns = df.columns.astype(str)
     new_cols = {}
     for col in df.columns:
@@ -51,21 +53,20 @@ def custom_parse_date(s: str):
     Если не получается, возвращает NaT.
     """
     try:
-        # Разбиваем строку на дату и время (удаляем лишние пробелы)
         s = s.strip()
         if not s:
             return pd.NaT
-        parts = s.split(' ')
-        # Иногда между датой и временем могут быть несколько пробелов, поэтому берем непустые части
-        parts = [p for p in parts if p]
+        parts = [p for p in s.split(' ') if p]
         if len(parts) < 2:
             return pd.NaT
         date_part, time_part = parts[0], parts[1]
         day, month, year = date_part.split('.')
         hour, minute, second = time_part.split(':')
-        return pd.Timestamp(year=int(year), month=int(month), day=int(day),
-                            hour=int(hour), minute=int(minute), second=int(second))
-    except Exception as e:
+        return pd.Timestamp(
+            year=int(year), month=int(month), day=int(day),
+            hour=int(hour), minute=int(minute), second=int(second)
+        )
+    except Exception:
         return pd.NaT
 
 def robust_parse_dates(series: pd.Series, sheet: str) -> pd.Series:
@@ -73,108 +74,108 @@ def robust_parse_dates(series: pd.Series, sheet: str) -> pd.Series:
     Надёжно распознаёт даты.
     1. Заменяет "nan", "NaN" и пустые строки на None.
     2. Если серия числовая – предполагает Excel-серийное число.
-    3. Если строковая – очищает пробелы, затем пытается явно разобрать формат 'DD.MM.YYYY HH:MM:SS'
-       с использованием custom_parse_date. Если не получается – fallback с infer_datetime_format.
+    3. Если строковая – пытается DD.MM.YYYY HH:MM:SS → custom_parse_date → infer.
     """
     series = series.replace({"nan": None, "NaN": None, "": None})
     if pd.api.types.is_datetime64_any_dtype(series):
         return series
     if pd.api.types.is_numeric_dtype(series):
         return pd.to_datetime(series, errors='coerce', unit='d', origin='1899-12-30')
-    
-    # Приводим к строке, убираем лишние пробелы
-    series = series.astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
-    # Сначала пытаемся явный формат
-    parsed = pd.to_datetime(series, format='%d.%m.%Y %H:%M:%S', errors='coerce', dayfirst=True)
-    # Если для некоторых значений получилось NaT, применяем custom_parse_date
+
+    clean = series.astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
+    parsed = pd.to_datetime(clean, format='%d.%m.%Y %H:%M:%S', errors='coerce', dayfirst=True)
     mask = parsed.isna()
     if mask.any():
-        fallback = series[mask].apply(custom_parse_date)
-        # Если и custom_parse_date не смог вернуть дату, попробуем fallback с infer_datetime_format
+        fallback = clean[mask].apply(custom_parse_date)
         still_nan = fallback.isna()
         if still_nan.any():
-            fallback.loc[still_nan] = pd.to_datetime(series[mask][still_nan], errors='coerce', infer_datetime_format=True, dayfirst=True)
+            fallback.loc[still_nan] = pd.to_datetime(
+                clean[mask][still_nan],
+                errors='coerce',
+                infer_datetime_format=True,
+                dayfirst=True
+            )
         parsed.loc[mask] = fallback
     return parsed
 
-
 def load_data_from_file(file_path: str) -> dict:
-
-    """Загружает данные из файла Excel и возвращает словарь с DataFrame для каждого листа."""
+    """
+    Загружает данные из Excel-файла и возвращает словарь:
+      {
+        'ggtips': dict of DataFrame by sheet,
+        'ggtipsCompanies': dict of DataFrame by sheet,
+        'ggtipsPartners': dict of DataFrame by sheet,
+        'partnersArchive': DataFrame,
+        'ggTeammates': DataFrame
+      }
+    """
     logger.info(f"Loading file: {file_path}")
 
+    # Инициализация пустых слотов
     data = {
-        'ggtips': pd.DataFrame(),
-        'ggtipsCompanies': pd.DataFrame(),
-        'ggtipsPartners': pd.DataFrame(),
-        'ggTeammates': pd.DataFrame(),
+        'ggtips':        {key: pd.DataFrame() for key in ggTips_TARGET_SHEETS},
+        'ggtipsCompanies': {key: pd.DataFrame() for key in ggTipsCompanies_TARGET_SHEETS},
+        'ggtipsPartners':  {key: pd.DataFrame() for key in ggTipsPartners_TARGET_SHEETS},
+        'partnersArchive': pd.DataFrame(),
+        'ggTeammates':     pd.DataFrame()
     }
-
-    data['ggtips'] = {key: pd.DataFrame() for key in ggTips_TARGET_SHEETS}
-    data['ggtipsCompanies'] = {key: pd.DataFrame() for key in ggTipsCompanies_TARGET_SHEETS}
-    data['ggtipsPartners'] = {key: pd.DataFrame() for key in ggTipsPartners_TARGET_SHEETS}
 
     if not os.path.exists(file_path):
         logger.error(f"File {file_path} does not exist.")
         return data
-    
-    if file_path.lower().endswith(".xlsx"):
-        xls = pd.ExcelFile(file_path)
-        for sheet in xls.sheet_names:
-            sheet_lower = sheet.lower()
-            if sheet_lower in ggTips_TARGET_SHEETS:
-                df = pd.read_excel(xls, sheet_name=sheet)
-                logger.info(f"Loaded sheet {sheet_lower} with columns: {df.columns.tolist()}")
-                df = standardize_columns(df)
 
-                if "date" in df.columns:
-                    if not pd.api.types.is_datetime64_any_dtype(df["date"]):
-                        df["date"] = robust_parse_dates(df["date"], sheet)
-                    if df["date"].isna().any():
-                        logger.warning(f"Some dates in sheet {sheet} could not be parsed:")
-                        logger.warning(df[df["date"].isna()][["date"]])
-                if "uuid" in df.columns:
-                    df.set_index("uuid", inplace=True)
-                else:
-                    logger.warning(f"Column 'uuid' not found in sheet {sheet}.")
-                data['ggtips'][sheet_lower] = df
-
-            if sheet_lower in ggTipsCompanies_TARGET_SHEETS:
-                df = pd.read_excel(xls, sheet_name=sheet)
-                logger.info(f"Loaded sheet {sheet_lower} with columns: {df.columns.tolist()}")
-                df = standardize_columns(df)
-                if "date" in df.columns:
-                    if not pd.api.types.is_datetime64_any_dtype(df["date"]):
-                        df["date"] = robust_parse_dates(df["date"], sheet)
-                    if df["date"].isna().any():
-                        logger.warning(f"Some dates in sheet {sheet} could not be parsed:")
-                        logger.warning(df[df["date"].isna()][["date"]])
-                data['ggtipsCompanies'][sheet_lower] = df
-
-            if sheet_lower in ggTipsPartners_TARGET_SHEETS:
-                df = pd.read_excel(xls, sheet_name=sheet)
-                logger.info(f"Loaded sheet {sheet} with columns: {df.columns.tolist()}")
-                df = standardize_columns(df)
-                if "date" in df.columns:
-                    if not pd.api.types.is_datetime64_any_dtype(df["date"]):
-                        df["date"] = robust_parse_dates(df["date"], sheet)
-                    if df["date"].isna().any():
-                        logger.warning(f"Some dates in sheet {sheet} could not be parsed:")
-                        logger.warning(df[df["date"].isna()][["date"]])
-                data['ggtipsPartners'][sheet_lower] = df
-            
-            if sheet_lower=='gg teammates' or sheet_lower=='ggteammates':
-                df = pd.read_excel(xls, sheet_name=sheet)
-                logger.info(f"Loaded sheet {sheet} with columns: {df.columns.tolist()}")
-                data['ggTeammates'] = df
-    else:
+    if not file_path.lower().endswith(".xlsx"):
         logger.error("Only Excel (.xlsx) files are supported.")
+        return data
+
+    xls = pd.ExcelFile(file_path)
+    for sheet in xls.sheet_names:
+        sheet_lower = sheet.lower()
+        df = pd.read_excel(xls, sheet_name=sheet)
+        logger.info(f"Loaded sheet {sheet_lower} with columns: {df.columns.tolist()}")
+        df = standardize_columns(df)
+
+        # ── Основные листы с транзакциями ──────────────────────────────────────
+        if sheet_lower in ggTips_TARGET_SHEETS:
+            if "date" in df.columns:
+                df["date"] = robust_parse_dates(df["date"], sheet)
+            if "uuid" in df.columns:
+                df.set_index("uuid", inplace=True)
+            data['ggtips'][sheet_lower] = df
+            continue
+
+        # ── Лист с компаниями ──────────────────────────────────────────────────
+        if sheet_lower in ggTipsCompanies_TARGET_SHEETS:
+            if "date" in df.columns:
+                df["date"] = robust_parse_dates(df["date"], sheet)
+            data['ggtipsCompanies'][sheet_lower] = df
+            continue
+
+        # ── Лист partners details ─────────────────────────────────────────────
+        if sheet_lower in ggTipsPartners_TARGET_SHEETS:
+            if "date" in df.columns:
+                df["date"] = robust_parse_dates(df["date"], sheet)
+            data['ggtipsPartners'][sheet_lower] = df
+            continue
+
+        # ── Новый лист партнёрского архива ─────────────────────────────────────
+        if sheet_lower in PARTNERS_ARCHIVE_SHEET:
+            # ожидаем колонки ['partner mail', 'company']
+            df.columns = df.columns.astype(str)
+            # просто сохраняем, дальше будете мёржить по email
+            data['partnersArchive'] = df
+            continue
+
+        # ── Лист с ggTeammates ────────────────────────────────────────────────
+        if sheet_lower in {'gg teammates', 'ggteammates'}:
+            data['ggTeammates'] = df
+            continue
 
     return data
 
 def merge_ggTips_sheets(data_dict: dict) -> pd.DataFrame:
     """Объединяет данные из листов по 'uuid' с учетом приоритета."""
-    priority_order = ["alltips", "ggpayers", "superadmin"]
+    priority_order = ["alltips", "ggpayers", "superadmin", "partners archive"]
     data_dict = {sheet: data_dict[sheet] for sheet in priority_order if sheet in data_dict and not data_dict[sheet].empty}
     if not data_dict:
         logger.warning("No data to merge.")
@@ -212,7 +213,7 @@ def merge_ggTips_sheets(data_dict: dict) -> pd.DataFrame:
 
 def merge_ggTipsCompanies_sheets(data_dict: dict) -> pd.DataFrame:
     """Объединяет данные из листов по 'company' с учетом приоритета."""
-    priority_order = ["companies", "partners details"]
+    priority_order = ["companies", "partners details", "partners archive"]
     data_dict = {sheet: data_dict[sheet] for sheet in priority_order if sheet in data_dict and not data_dict[sheet].empty}
     if not data_dict:
         logger.warning("No data to merge.")
