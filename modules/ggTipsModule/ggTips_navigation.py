@@ -300,44 +300,44 @@ def show_ggtips_sidebar_filters(data: dict):
         date_min = metrics.LastTx.min().date() if not metrics.LastTx.isna().all() else None
         date_max = metrics.LastTx.max().date() if not metrics.LastTx.isna().all() else None
 
-        st.markdown("**By company’s performance:**")
-        amt_range = st.slider(
-            "Amount range",
-            min_value=amt_min, max_value=amt_max,
-            value=(amt_min, amt_max),
-            step=max(1, (amt_max-amt_min)//20),
-            key="company_amount_range"
-        )
-        cnt_range = st.slider(
-            "Count range",
-            min_value=cnt_min, max_value=cnt_max,
-            value=(cnt_min, cnt_max),
-            step=1,
-            key="company_count_range"
-        )
-        last_tx_range = st.date_input(
-            "Last tip",
-            value=[date_min, date_max] if date_min and date_max else [],
-            key="company_last_tx_range"
-        )
+        # st.markdown("**By company’s performance:**")
+        # amt_range = st.slider(
+        #     "Amount range",
+        #     min_value=amt_min, max_value=amt_max,
+        #     value=(amt_min, amt_max),
+        #     step=max(1, (amt_max-amt_min)//20),
+        #     key="company_amount_range"
+        # )
+        # cnt_range = st.slider(
+        #     "Count range",
+        #     min_value=cnt_min, max_value=cnt_max,
+        #     value=(cnt_min, cnt_max),
+        #     step=1,
+        #     key="company_count_range"
+        # )
+        # last_tx_range = st.date_input(
+        #     "Last tip",
+        #     value=[date_min, date_max] if date_min and date_max else [],
+        #     key="company_last_tx_range"
+        # )
 
         # Применяем фильтрацию по метрикам
-        m = metrics.copy()
-        m = m[
-            (m.Amount.between(*amt_range)) &
-            (m.Count.between(*cnt_range))
-        ]
-        if len(last_tx_range) == 2:
-            start_d, end_d = last_tx_range
-            m = m[
-                (m.LastTx.dt.date >= start_d) &
-                (m.LastTx.dt.date <= end_d)
-            ]
-        valid = m["company"].tolist()
+        # m = metrics.copy()
+        # m = m[
+        #     (m.Amount.between(*amt_range)) &
+        #     (m.Count.between(*cnt_range))
+        # ]
+        # if len(last_tx_range) == 2:
+        #     start_d, end_d = last_tx_range
+        #     m = m[
+        #         (m.LastTx.dt.date >= start_d) &
+        #         (m.LastTx.dt.date <= end_d)
+        #     ]
+        # valid = m["company"].tolist()
 
-        mergedTips = mergedTips[mergedTips["company"].isin(valid)]
-        companies  = companies[companies["company"].isin(valid)]
-        partners   = partners[partners["company"].isin(valid)]
+        # mergedTips = mergedTips[mergedTips["company"].isin(valid)]
+        # companies  = companies[companies["company"].isin(valid)]
+        # partners   = partners[partners["company"].isin(valid)]
 
         # partners 
         partners = data.get('ggtipsPartners', pd.DataFrame()).copy()
