@@ -153,16 +153,17 @@ def show_ggtips_sidebar_filters(data: dict):
     # 4. Объединяем транзакции с данными компаний по company (left join)
     invalid_values = [None, "", "-", "nan", "null", "undefined", "N/A", "none", "not found"]
 
-    filteredTips = (
-        filteredTips
-        .assign(
-            company=lambda df: (
-                df["company_x"].replace(invalid_values, pd.NA)
-                .combine_first(df["company_y"].replace(invalid_values, pd.NA))
+    if 'company_x' in filteredTips.columns and 'company_y' in filteredTips.columns:
+        filteredTips = (
+            filteredTips
+            .assign(
+                company=lambda df: (
+                    df["company_x"].replace(invalid_values, pd.NA)
+                    .combine_first(df["company_y"].replace(invalid_values, pd.NA))
+                )
             )
+            .drop(columns=["company_x", "company_y", "company_unified"], errors="ignore")
         )
-        .drop(columns=["company_x", "company_y", "company_unified"], errors="ignore")
-    )
 
     if not companies.empty and "company" in companies.columns:
         companies_for_join = companies.set_index("company")
@@ -565,6 +566,9 @@ def show_ggtips_sidebar_filters(data: dict):
             groupedTips = group_by_time_interval(mergedTips, st.session_state['timeInterval'], custom_days)
         else:
             groupedTips = group_by_time_interval(mergedTips, st.session_state['timeInterval'])
+
+    mergedTips['region'] = mergedTips['region'].combine_first(mergedTips['region_co'])
+    mergedTips = mergedTips.drop(columns=['unnamed: 11', 'unnamed: 12', 'helpercompanyname', 'company_unified_co'], errors='ignore')
 
     return {
         'ggtips': mergedTips,

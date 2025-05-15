@@ -1,7 +1,6 @@
 # C:\Users\user\OneDrive\Desktop\Workspace\ggAnalyze\modules\ggTipsModule\ggTips_data.py
 import pandas as pd
-from data_loader import merge_ggTips_sheets
-import streamlit as st
+from data_loader import merge_ggtips
 
 def get_combined_tips_data(session_clever_data: dict) -> dict:
 
@@ -14,9 +13,9 @@ def get_combined_tips_data(session_clever_data: dict) -> dict:
     }
     
     for file_data in session_clever_data.values():
-        merged_tips = merge_ggTips_sheets(file_data['ggtips'])
+        merged_tips = merge_ggtips(file_data['ggtips'])
         # вот он — ваш архив из load_data
-
+        
         archive = file_data.get('partnersArchive', pd.DataFrame())
 
         if not archive.empty:

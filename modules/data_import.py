@@ -1,5 +1,6 @@
 # C:\Users\user\OneDrive\Desktop\Workspace\ggAnalyze\modules\data_import.py
 import streamlit as st
+
 from data_loader import load_data_from_file
 import os
 import pandas as pd
@@ -67,6 +68,7 @@ def show_file_navigator():
     )
 
     if selected_file:
+    
         data_dict = st.session_state.clever_data.get(selected_file, {})
 
         if data_dict:
@@ -112,5 +114,6 @@ def show():
     st.divider()
     show_file_navigator()
 
+# st.write(st.session_state.clever_data)
 if __name__ == "__main__":
     show()

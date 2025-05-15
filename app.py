@@ -1,8 +1,9 @@
 # C:\Users\user\OneDrive\Desktop\Workspace\ggAnalyze\app.py
 import streamlit as st
 from auth import login
-from modules import data_import, corp_analysis, advanced
+from modules import data_import, advanced
 from modules.ggTipsModule import ggTips
+from modules.BusinessModule import ggBusiness
 from modules.ggModule import gg
 from modules.ggTipsModule import ggTips_navigation
 
@@ -21,20 +22,25 @@ if "data" not in st.session_state:
 with st.sidebar:
     page = st.radio("Select a page", ( "Data Import", "gg", "ggTips", "ggBusiness", "Developer mode"))
     # Фильтры ggTips будем показывать, только если выбрана соответствующая страница
-
+    
     if page == "ggTips":
-         
         if "data" in st.session_state and st.session_state.clever_data:
-            filtered_tips = ggTips_navigation.show_ggtips_sidebar_filters(st.session_state.clever_data)
+            filteredTips = ggTips_navigation.show_ggtips_sidebar_filters(st.session_state.clever_data)
         else:
-            filtered_tips = None
+            filteredTips = None
+    elif page=='ggBusiness':
+        if "data" in st.session_state and st.session_state.clever_data:
+            ggBusinessData =st.session_state.clever_data
+        else:
+            ggBusinessData = None
             
+st.write(ggBusinessData)     
 if page == "Data Import":
     data_import.show()
 elif page == "ggTips":
-    ggTips.show(filtered_tips)
+    ggTips.show(filteredTips)
 elif page == "ggBusiness":
-    corp_analysis.show()
+    ggBusiness.show(ggBusinessData)
 elif page == "gg":
     gg.show()
 elif page == "Developer mode":

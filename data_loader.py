@@ -1,251 +1,288 @@
-# C:\Users\user\OneDrive\Desktop\Workspace\ggAnalyze\data_loader.py
-
 import os
 import logging
 import pandas as pd
 import numpy as np
-import streamlit as st
 
-# Настройка логирования для отладки
+# ──────────────────────────────────────────────────────────────────────────────
+# Листы, которые мы ожидаем
+# ──────────────────────────────────────────────────────────────────────────────
+GG_TIPS_SHEETS         = {"alltips", "ggpayers", "superadmin"}
+GG_COMPANIES_SHEETS    = {"companies"}
+GG_PARTNERS_SHEETS     = {"partners details"}
+GG_TEAMMATES_SHEETS    = {"gg teammates", "ggteammates"}
+ORDERS_COUNT_SHEETS    = {"orders count"}
+STATISTICS_SHEETS       = {"statistics"}
+# ──────────────────────────────────────────────────────────────────────────────
+# Логирование
+# ──────────────────────────────────────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Списки целевых листов (в нижнем регистре)
-ggTips_TARGET_SHEETS           = {"alltips", "ggpayers", "superadmin"}
-ggTipsCompanies_TARGET_SHEETS  = {"companies"}
-ggTipsPartners_TARGET_SHEETS   = {"partners details"}
-PARTNERS_ARCHIVE_SHEET         = {"partners archive"}   # <-- новый лист
-
-def normalize_column(col_name: str) -> str:
-    """Приводит имя столбца к стандартному виду."""
-    return col_name.lower().strip().replace("-", "").replace("_", "")
+# ──────────────────────────────────────────────────────────────────────────────
+# Утилиты для нормализации колонок и парсинга дат
+# ──────────────────────────────────────────────────────────────────────────────
+def normalize_column(col: str) -> str:
+    return col.lower().strip().replace("-", "").replace("_", "")
 
 def standardize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Стандартизирует имена столбцов."""
     df = df.copy()
     df.columns = df.columns.astype(str)
-    new_cols = {}
+    mapping = {}
     for col in df.columns:
-        if df[col].dtype == 'object':
-            df[col] = df[col].astype(str)
         norm = normalize_column(col)
         if norm in {"uuid", "remoteorderid"}:
-            new_cols[col] = "uuid"
+            mapping[col] = "uuid"
         elif norm in {"date", "createdat", "created_at", "transactiondate"}:
-            new_cols[col] = "date"
+            mapping[col] = "date"
         elif norm in {"company", "companyname", "company name"}:
-            new_cols[col] = "company"
+            mapping[col] = "company"
         elif norm in {"partner", "name", "partnername", "partner name"}:
-            new_cols[col] = "partner"
+            mapping[col] = "partner"
         elif norm in {"region"}:
-            new_cols[col] = "region"
+            mapping[col] = "region"
         elif norm in {"workingstatus", "working status"}:
-            new_cols[col] = "working status"
+            mapping[col] = "working status"
             df[col] = df[col].astype(str).str.lower()
         else:
-            new_cols[col] = norm
-    df.rename(columns=new_cols, inplace=True)
-    return df
+            mapping[col] = norm
+    return df.rename(columns=mapping)
 
-def custom_parse_date(s: str):
-    """
-    Парсит строку в формате 'DD.MM.YYYY HH:MM:SS' вручную.
-    Если не получается, возвращает NaT.
-    """
+def custom_parse_date(s: str) -> pd.Timestamp:
     try:
         s = s.strip()
         if not s:
             return pd.NaT
-        parts = [p for p in s.split(' ') if p]
-        if len(parts) < 2:
-            return pd.NaT
-        date_part, time_part = parts[0], parts[1]
-        day, month, year = date_part.split('.')
-        hour, minute, second = time_part.split(':')
+        date_part, time_part = [p for p in s.split(" ") if p][:2]
+        day, month, year = date_part.split(".")
+        hour, minute, second = time_part.split(":")
         return pd.Timestamp(
-            year=int(year), month=int(month), day=int(day),
-            hour=int(hour), minute=int(minute), second=int(second)
+            int(year), int(month), int(day),
+            int(hour), int(minute), int(second)
         )
-    except Exception:
+    except:
         return pd.NaT
 
-def robust_parse_dates(series: pd.Series, sheet: str) -> pd.Series:
-    """
-    Надёжно распознаёт даты.
-    1. Заменяет "nan", "NaN" и пустые строки на None.
-    2. Если серия числовая – предполагает Excel-серийное число.
-    3. Если строковая – пытается DD.MM.YYYY HH:MM:SS → custom_parse_date → infer.
-    """
-    series = series.replace({"nan": None, "NaN": None, "": None})
-    if pd.api.types.is_datetime64_any_dtype(series):
-        return series
-    if pd.api.types.is_numeric_dtype(series):
-        return pd.to_datetime(series, errors='coerce', unit='d', origin='1899-12-30')
-
-    clean = series.astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
-    parsed = pd.to_datetime(clean, format='%d.%m.%Y %H:%M:%S', errors='coerce', dayfirst=True)
+def robust_parse_dates(ser: pd.Series, sheet: str) -> pd.Series:
+    ser = ser.replace({"nan": None, "NaN": None, "": None})
+    if pd.api.types.is_datetime64_any_dtype(ser):
+        return ser
+    if pd.api.types.is_numeric_dtype(ser):
+        return pd.to_datetime(ser, unit="d", origin="1899-12-30", errors="coerce")
+    clean = ser.astype(str).str.replace(r"\s+", " ", regex=True).str.strip()
+    parsed = pd.to_datetime(clean, format="%d.%m.%Y %H:%M:%S",
+                            errors="coerce", dayfirst=True)
     mask = parsed.isna()
     if mask.any():
-        fallback = clean[mask].apply(custom_parse_date)
-        still_nan = fallback.isna()
-        if still_nan.any():
-            fallback.loc[still_nan] = pd.to_datetime(
-                clean[mask][still_nan],
-                errors='coerce',
+        fb = clean[mask].apply(custom_parse_date)
+        still = fb.isna()
+        if still.any():
+            fb.loc[still] = pd.to_datetime(
+                clean[mask][still],
+                errors="coerce",
                 infer_datetime_format=True,
                 dayfirst=True
             )
-        parsed.loc[mask] = fallback
+        parsed.loc[mask] = fb
     return parsed
 
-def load_data_from_file(file_path: str) -> dict:
+# ──────────────────────────────────────────────────────────────────────────────
+# 1) load_data_from_file
+# ──────────────────────────────────────────────────────────────────────────────
+def load_data_from_file(path: str) -> dict:
     """
-    Загружает данные из Excel-файла и возвращает словарь:
+    Возвращает словарь:
       {
-        'ggtips': dict of DataFrame by sheet,
-        'ggtipsCompanies': dict of DataFrame by sheet,
-        'ggtipsPartners': dict of DataFrame by sheet,
-        'partnersArchive': DataFrame,
-        'ggTeammates': DataFrame
+        "ggtips":        {sheet_name: DataFrame, ...},
+        "ggtipsCompanies": {sheet_name: DataFrame, ...},
+        "ggtipsPartners":  {sheet_name: DataFrame, ...},
+        "ggTeammates":     DataFrame,
+        "ordersCount":     DataFrame
       }
     """
-    logger.info(f"Loading file: {file_path}")
-
-    # Инициализация пустых слотов
-    data = {
-        'ggtips':        {key: pd.DataFrame() for key in ggTips_TARGET_SHEETS},
-        'ggtipsCompanies': {key: pd.DataFrame() for key in ggTipsCompanies_TARGET_SHEETS},
-        'ggtipsPartners':  {key: pd.DataFrame() for key in ggTipsPartners_TARGET_SHEETS},
-        'partnersArchive': pd.DataFrame(),
-        'ggTeammates':     pd.DataFrame()
+    logger.info(f"Loading file: {path}")
+    result = {
+        "ggtips": {k: pd.DataFrame() for k in GG_TIPS_SHEETS},
+        "ggtipsCompanies": {k: pd.DataFrame() for k in GG_COMPANIES_SHEETS},
+        "ggtipsPartners": {k: pd.DataFrame() for k in GG_PARTNERS_SHEETS},
+        "ggTeammates": pd.DataFrame(),
+        "ordersCount": pd.DataFrame(),
     }
 
-    if not os.path.exists(file_path):
-        logger.error(f"File {file_path} does not exist.")
-        return data
+    if not os.path.exists(path):
+        logger.error(f"File not found: {path}")
+        return result
 
-    if not file_path.lower().endswith(".xlsx"):
-        logger.error("Only Excel (.xlsx) files are supported.")
-        return data
+    ext = path.lower().split('.')[-1]
+    if ext == "xlsx":
+        xls = pd.ExcelFile(path)
+        for sheet in xls.sheet_names:
+            sl = sheet.lower()
+            df = pd.read_excel(xls, sheet_name=sheet)
+            df = standardize_columns(df)
 
-    xls = pd.ExcelFile(file_path)
-    for sheet in xls.sheet_names:
-        sheet_lower = sheet.lower()
-        df = pd.read_excel(xls, sheet_name=sheet)
-        logger.info(f"Loaded sheet {sheet_lower} with columns: {df.columns.tolist()}")
+            # — ggtips sheets —
+            if sl in GG_TIPS_SHEETS:
+                if "date" in df.columns:
+                    df["date"] = robust_parse_dates(df["date"], sheet)
+                if "uuid" in df.columns:
+                    df = df.set_index("uuid", drop=False)
+                result["ggtips"][sl] = df
+                continue
+
+            # — companies —
+            if sl in GG_COMPANIES_SHEETS:
+                if "date" in df.columns:
+                    df["date"] = robust_parse_dates(df["date"], sheet)
+                result["ggtipsCompanies"][sl] = df
+                continue
+
+            # — partners details —
+            if sl in GG_PARTNERS_SHEETS:
+                if "date" in df.columns:
+                    df["date"] = robust_parse_dates(df["date"], sheet)
+                result["ggtipsPartners"][sl] = df
+                continue
+
+            # — gg teammates —
+            if sl in GG_TEAMMATES_SHEETS:
+                result["ggTeammates"] = df
+                continue
+
+            # — orders count —
+            if sl in ORDERS_COUNT_SHEETS:
+                if "date" in df.columns:
+                    df["date"] = robust_parse_dates(df["date"], sheet)
+                result["ordersCount"] = df
+                continue
+
+            # — STATISTIC —
+            if sl in STATISTICS_SHEETS:
+                if "date" in df.columns:
+                    df["date"] = robust_parse_dates(df["date"], sheet)
+                result["statistic"] = df
+                continue
+
+    elif ext == "csv":
+        # если нужен CSV
+        df = pd.read_csv(path)
         df = standardize_columns(df)
+        if "date" in df.columns:
+            df["date"] = robust_parse_dates(df["date"], path)
+        # принимаем что это tips
+        result["ggtips"] = {"csv": df}
 
-        # ── Основные листы с транзакциями ──────────────────────────────────────
-        if sheet_lower in ggTips_TARGET_SHEETS:
-            if "date" in df.columns:
-                df["date"] = robust_parse_dates(df["date"], sheet)
-            if "uuid" in df.columns:
-                df.set_index("uuid", inplace=True)
-            data['ggtips'][sheet_lower] = df
-            continue
+    else:
+        logger.error("Unsupported extension: must be .xlsx or .csv")
 
-        # ── Лист с компаниями ──────────────────────────────────────────────────
-        if sheet_lower in ggTipsCompanies_TARGET_SHEETS:
-            if "date" in df.columns:
-                df["date"] = robust_parse_dates(df["date"], sheet)
-            data['ggtipsCompanies'][sheet_lower] = df
-            continue
+    return result
 
-        # ── Лист partners details ─────────────────────────────────────────────
-        if sheet_lower in ggTipsPartners_TARGET_SHEETS:
-            if "date" in df.columns:
-                df["date"] = robust_parse_dates(df["date"], sheet)
-            data['ggtipsPartners'][sheet_lower] = df
-            continue
-
-        # ── Новый лист партнёрского архива ─────────────────────────────────────
-        if sheet_lower in PARTNERS_ARCHIVE_SHEET:
-            # ожидаем колонки ['partner mail', 'company']
-            df.columns = df.columns.astype(str)
-            # просто сохраняем, дальше будете мёржить по email
-            data['partnersArchive'] = df
-            continue
-
-        # ── Лист с ggTeammates ────────────────────────────────────────────────
-        if sheet_lower in {'gg teammates', 'ggteammates'}:
-            data['ggTeammates'] = df
-            continue
-
-    return data
-
-def merge_ggTips_sheets(data_dict: dict) -> pd.DataFrame:
-    """Объединяет данные из листов по 'uuid' с учетом приоритета."""
-    priority_order = ["alltips", "ggpayers", "superadmin", "partners archive"]
-    data_dict = {sheet: data_dict[sheet] for sheet in priority_order if sheet in data_dict and not data_dict[sheet].empty}
-    if not data_dict:
-        logger.warning("No data to merge.")
+# ──────────────────────────────────────────────────────────────────────────────
+# 2) Вспомогательные функции для слияния
+# ──────────────────────────────────────────────────────────────────────────────
+def merge_ggtips(sheets: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    order = ["alltips", "ggpayers", "superadmin"]
+    dfs = [sheets[k] for k in order if k in sheets and not sheets[k].empty]
+    if not dfs:
         return pd.DataFrame()
-    
-    invalid_values = [None, "N/A", "none", "not found", "", "-", "nan", "null", "undefined"]
-    
-    for sheet in data_dict:
-        if "uuid" not in data_dict[sheet].columns and "uuid" not in data_dict[sheet].index.names:
-            logger.error(f"Column 'uuid' missing in sheet {sheet}. Cannot set index.")
-            return pd.DataFrame()
-        if "uuid" in data_dict[sheet].columns:
-            data_dict[sheet].set_index("uuid", inplace=True)
-    
-    combined_df = data_dict[priority_order[0]].copy()
-    
-    for col in combined_df.columns:
-        if combined_df[col].dtype == 'datetime64[ns]':
-            combined_df[col] = combined_df[col].replace({pd.NaT: np.nan})
-        else:
-            combined_df[col] = combined_df[col].replace(invalid_values, np.nan)
-    
-    for sheet in priority_order[1:]:
-        if sheet in data_dict:
-            df = data_dict[sheet].copy()
-            for col in df.columns:
-                if df[col].dtype == 'datetime64[ns]':
-                    df[col] = df[col].replace({pd.NaT: np.nan})
-                else:
-                    df[col] = df[col].replace(invalid_values, np.nan)
-            combined_df = combined_df.combine_first(df)
-    
-    combined_df.reset_index(inplace=True)
-    return combined_df
+    # комбинируем с приоритетом
+    base = dfs[0].copy()
+    for df in dfs[1:]:
+        base = base.combine_first(df)
+    return base.reset_index(drop=True)
 
-def merge_ggTipsCompanies_sheets(data_dict: dict) -> pd.DataFrame:
-    """Объединяет данные из листов по 'company' с учетом приоритета."""
-    priority_order = ["companies", "partners details", "partners archive"]
-    data_dict = {sheet: data_dict[sheet] for sheet in priority_order if sheet in data_dict and not data_dict[sheet].empty}
-    if not data_dict:
-        logger.warning("No data to merge.")
+def merge_companies(sheets: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    order = ["companies"]
+    dfs = [sheets[k] for k in order if k in sheets and not sheets[k].empty]
+    if not dfs:
         return pd.DataFrame()
-    
-    invalid_values = [None, "N/A", "none", "not found", "", "-", "nan", "null", "undefined"]
-    
-    for sheet in data_dict:
-        if "company" not in data_dict[sheet].columns and "company" not in data_dict[sheet].index.names:
-            logger.error(f"Column 'Company' missing in sheet {sheet}. Cannot set index.")
-            return pd.DataFrame()
-        if "company" in data_dict[sheet].columns:
-            data_dict[sheet].set_index("company", inplace=True)
-    
-    combined_df = data_dict[priority_order[0]].copy()
-    
-    for col in combined_df.columns:
-        if combined_df[col].dtype == 'datetime64[ns]':
-            combined_df[col] = combined_df[col].replace({pd.NaT: np.nan})
-        else:
-            combined_df[col] = combined_df[col].replace(invalid_values, np.nan)
-    
-    for sheet in priority_order[1:]:
-        if sheet in data_dict:
-            df = data_dict[sheet].copy()
-            for col in df.columns:
-                if df[col].dtype == 'datetime64[ns]':
-                    df[col] = df[col].replace({pd.NaT: np.nan})
-                else:
-                    df[col] = df[col].replace(invalid_values, np.nan)
-            combined_df = combined_df.combine_first(df)
-    
-    combined_df.reset_index(inplace=True)
+    return dfs[0].reset_index(drop=True)
 
-    return combined_df
+def merge_partners(sheets: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    order = ["partners details"]
+    dfs = [sheets[k] for k in order if k in sheets and not sheets[k].empty]
+    if not dfs:
+        return pd.DataFrame()
+    return dfs[0].reset_index(drop=True)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 3) Собираем всё вместе
+# ──────────────────────────────────────────────────────────────────────────────
+def get_combined_data(session_data) -> dict:
+    """
+    session_data — это либо 
+      1) dict: путь->результат load_data_from_file
+      2) list/ndarray: список тех результатов
+    Возвращает:
+      {
+        "ggtips": DataFrame,
+        "ggtipsCompanies": DataFrame,
+        "ggtipsPartners": DataFrame,
+        "ggTeammates": DataFrame,
+        "ordersCount": DataFrame
+      }
+    """
+    # приводим к списку
+    if isinstance(session_data, dict):
+        items = list(session_data.values())
+    elif isinstance(session_data, (list, np.ndarray)):
+        items = list(session_data)
+    else:
+        return {}
+
+    # 1) ggtips
+    all_tips = []
+    for d in items:
+        df = merge_ggtips(d.get("ggtips", {}))
+        if not df.empty:
+            all_tips.append(df)
+    combined_tips = pd.concat(all_tips, ignore_index=True) if all_tips else pd.DataFrame()
+
+    # 2) companies
+    companies = pd.DataFrame()
+    for d in items:
+        df = merge_companies(d.get("ggtipsCompanies", {}))
+        if not df.empty:
+            companies = df
+            break
+
+    # 3) partners
+    partners = pd.DataFrame()
+    for d in items:
+        df = merge_partners(d.get("ggtipsPartners", {}))
+        if not df.empty:
+            partners = df
+            break
+
+    # 4) teammates
+    teammates = pd.DataFrame()
+    for d in items:
+        tm = d.get("ggTeammates", pd.DataFrame())
+        if not tm.empty:
+            teammates = tm
+            break
+
+    # 5) ordersCount
+    orders = []
+    for d in items:
+        oc = d.get("ordersCount", pd.DataFrame())
+        if not oc.empty:
+            orders.append(oc)
+    combined_orders = pd.concat(orders, ignore_index=True) if orders else pd.DataFrame()
+
+    # 6) Statistics
+    statistics = []
+    for d in items:
+        oc = d.get("statistic", pd.DataFrame())
+        if not oc.empty:
+            orders.append(oc)
+    statistics = pd.concat(orders, ignore_index=True) if orders else pd.DataFrame()
+
+
+    return {
+        "ggtips": combined_tips,
+        "ggtipsCompanies": companies,
+        "ggtipsPartners": partners,
+        "ggTeammates": teammates,
+        "ordersCount": combined_orders,
+        "statistics": statistics
+    }
