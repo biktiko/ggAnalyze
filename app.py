@@ -34,7 +34,6 @@ with st.sidebar:
         else:
             ggBusinessData = None
             
-st.write(ggBusinessData)     
 if page == "Data Import":
     data_import.show()
 elif page == "ggTips":
