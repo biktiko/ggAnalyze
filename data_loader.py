@@ -1,3 +1,4 @@
+# C:\Users\user\OneDrive\Desktop\Workspace\ggAnalyze\data_loader.py
 import os
 import logging
 import pandas as pd
@@ -11,7 +12,7 @@ GG_COMPANIES_SHEETS    = {"companies"}
 GG_PARTNERS_SHEETS     = {"partners details"}
 GG_TEAMMATES_SHEETS    = {"gg teammates", "ggteammates"}
 ORDERS_COUNT_SHEETS    = {"orders count"}
-STATISTICS_SHEETS       = {"statistics"}
+clients_SHEETS       = {"clients"}
 # ──────────────────────────────────────────────────────────────────────────────
 # Логирование
 # ──────────────────────────────────────────────────────────────────────────────
@@ -89,16 +90,7 @@ def robust_parse_dates(ser: pd.Series, sheet: str) -> pd.Series:
 # 1) load_data_from_file
 # ──────────────────────────────────────────────────────────────────────────────
 def load_data_from_file(path: str) -> dict:
-    """
-    Возвращает словарь:
-      {
-        "ggtips":        {sheet_name: DataFrame, ...},
-        "ggtipsCompanies": {sheet_name: DataFrame, ...},
-        "ggtipsPartners":  {sheet_name: DataFrame, ...},
-        "ggTeammates":     DataFrame,
-        "ordersCount":     DataFrame
-      }
-    """
+
     logger.info(f"Loading file: {path}")
     result = {
         "ggtips": {k: pd.DataFrame() for k in GG_TIPS_SHEETS},
@@ -106,6 +98,7 @@ def load_data_from_file(path: str) -> dict:
         "ggtipsPartners": {k: pd.DataFrame() for k in GG_PARTNERS_SHEETS},
         "ggTeammates": pd.DataFrame(),
         "ordersCount": pd.DataFrame(),
+        'clients': pd.DataFrame()
     }
 
     if not os.path.exists(path):
@@ -155,11 +148,11 @@ def load_data_from_file(path: str) -> dict:
                 result["ordersCount"] = df
                 continue
 
-            # — STATISTIC —
-            if sl in STATISTICS_SHEETS:
+            # — clients —
+            if sl in clients_SHEETS:
                 if "date" in df.columns:
                     df["date"] = robust_parse_dates(df["date"], sheet)
-                result["statistic"] = df
+                result["clients"] = df
                 continue
 
     elif ext == "csv":
@@ -269,14 +262,14 @@ def get_combined_data(session_data) -> dict:
             orders.append(oc)
     combined_orders = pd.concat(orders, ignore_index=True) if orders else pd.DataFrame()
 
-    # 6) Statistics
-    statistics = []
-    for d in items:
-        oc = d.get("statistic", pd.DataFrame())
-        if not oc.empty:
-            orders.append(oc)
-    statistics = pd.concat(orders, ignore_index=True) if orders else pd.DataFrame()
+    # 6) clients
+    clients = pd.DataFrame()
 
+    for d in items:
+        df = d.get("clients", pd.DataFrame())
+        if not df.empty:
+            clients = df
+            break
 
     return {
         "ggtips": combined_tips,
@@ -284,5 +277,5 @@ def get_combined_data(session_data) -> dict:
         "ggtipsPartners": partners,
         "ggTeammates": teammates,
         "ordersCount": combined_orders,
-        "statistics": statistics
+        "clients": clients
     }

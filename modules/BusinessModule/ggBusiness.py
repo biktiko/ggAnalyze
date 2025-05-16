@@ -1,26 +1,29 @@
-# C:\Users\user\OneDrive\Desktop\Workspace\ggAnalyze\modules\ggTipsModule\ggTips.py
+# modules/BusinessModule/ggBusiness.py
+
 import streamlit as st
 from modules.data_import import upload_file
 from modules.BusinessModule.ggBusinessTabs import ordersTab, activationsTab
 from modules.BusinessModule.ggBusinessData import get_combined_business_data
 
-def show(data):
+def show(clever_data):
     st.title("ggBusiness Analysis")
-    # Если данные не переданы, вызываем интерфейс загрузки данных
-    if data is None:
+
+    # Если данных нет — просим загрузить
+    if not clever_data:
         st.warning("No data available. Please import data first.")
-        upload_file()  # Показываем загрузчик файлов
-        st.rerun() 
+        upload_file()
+        st.stop()
 
-    data = get_combined_business_data(data)
-            
-    OrdersTab, ActivationsTab = st.tabs(
-        ['Orders', 'Activations']
-    )
+    data = get_combined_business_data(clever_data)
 
-    with OrdersTab:
+    tab1, tab2 = st.tabs(["Orders", "Statistics"])
+
+    with tab1:
         ordersTab.show(data)
 
-    with ActivationsTab:
-        st.write("Activations data will be shown here.")
-
+    with tab2:
+        st.write(data)
+        # if data["statistic"].empty:
+        #     st.info("No statistics sheet found in any file.")
+        # else:
+        #     st.dataframe(data["statistic"], use_container_width=True)

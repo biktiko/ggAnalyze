@@ -1,44 +1,91 @@
-# C:\Users\user\OneDrive\Desktop\Workspace\ggAnalyze\modules\ggTipsModule\ggTips_data.py
+# modules/BusinessModule/ggBusinessData.py
+
 import pandas as pd
 
-# def merge_business_data(sheets: dict[str, pd.DataFrame]) -> pd.DataFrame:
-#     sheets = ["orders count"]
-#     dfs = [sheets[k] for k in sheets if k in sheets and not sheets[k].empty]
-#     if not dfs:
-#         return pd.DataFrame()
-#     # комбинируем с приоритетом
-#     base = dfs[0].copy()
-#     for df in dfs[1:]:
-#         base = base.combine_first(df)
-#     return base.reset_index(drop=True)
+# def clean_clients(df: pd.DataFrame) -> pd.DataFrame:
+#     """
+#     Ищет в DataFrame строку-заголовок, где встречаются ключевые поля:
+#     userId, company, PhoneNumber, companyManager, Connected Day.
+#     Делает её новой шапкой, обрезает всё выше, и оставляет только эти колонки
+#     (в правильном регистре).
+#     """
+#     # если совсем пусто, возвращаем пустушку с нужными именами
+#     cols = ["userId","company","PhoneNumber","companyManager","Connected Day"]
+#     if df.empty:
+#         return pd.DataFrame(columns=cols)
+
+#     # нормализованный набор «ключей»
+#     required = {"userid","company","phonenumber","companymanager","connected day"}
+#     header_idx = None
+
+#     # ищем строку, где встречается как минимум 3 наших ключа
+#     for i, row in df.iterrows():
+#         lowered = [str(v).strip().lower() for v in row.values]
+#         if sum(1 for v in lowered if v in required) >= 3:
+#             header_idx = i
+#             break
+
+#     if header_idx is None:
+#         # не нашли — возвращаем пустую
+#         return pd.DataFrame(columns=cols)
+
+#     # привязываем к каждой колонке её «заголовок» из найденной строки
+#     header_row = [str(v).strip().lower() for v in df.loc[header_idx].values]
+
+#     # карта от того, что в header_row, к каноническому названию
+#     canon = {
+#         "userid":           "userId",
+#         "company":          "company",
+#         "phonenumber":      "PhoneNumber",
+#         "companymanager":   "companyManager",
+#         "connected day":    "Connected Day"
+#     }
+
+#     # какие колонки действительно нам нужны — их индексы
+#     keep = []
+#     for idx, h in enumerate(header_row):
+#         if h in canon:
+#             keep.append((idx, canon[h]))
+
+#     # если вдруг не нашли ни одной — пусто
+#     if not keep:
+#         return pd.DataFrame(columns=cols)
+
+#     # вырезаем данные начиная со следующей за header_idx строки
+#     data = df.iloc[header_idx+1 : , [idx for idx,_ in keep]].copy()
+#     # назначаем правильные имена
+#     data.columns = [new_name for _, new_name in keep]
+
+#     # сбрасываем индекс, убираем лишние строки
+#     return data.reset_index(drop=True)
+
+
 
 def get_combined_business_data(session_clever_data: dict) -> dict:
+    """
+    Собирает из session_clever_data:
+      - orders: все листы 'orders count'
+      - clients: все листы 'clients' (ключ в load_data_from_file – 'clients')
+    """
+    orders_list = []
+    clients_list  = []
 
-    # Initialize lists to collect DataFrames
-    combined_data = {
-        'orders': [],
-        'companies': []
-    }
-
-    result = {}
-    import streamlit as st
     for file_data in session_clever_data.values():
-    
-        st.write(file_data)
-        result['orders'] = file_data['ordersCount'] if file_data['ordersCount'] is not None else pd.DataFrame()
-        
-        if not result['orders'].empty:
-            needed_columns = ['date', 'userid', 'orders']
-            result['orders'] = result['orders'][needed_columns]
-            combined_data['orders'].append(result['orders'])
+        # --- ordersCount ---
+        oc = file_data.get("ordersCount", pd.DataFrame())
+        if not oc.empty:
+            cols = [c for c in ("date","userid","orders") if c in oc.columns]
+            orders_list.append(oc[cols].copy())
 
-        result['companies'] = file_data['statistic'] if file_data['statistic'] is not None else pd.DataFrame()
+        # --- clients (обратите внимание на ключ 'clients'!) ---
+        st_df = file_data.get("clients", pd.DataFrame())
+        if not st_df.empty:
+            clients_list.append(st_df.copy())
 
-    if combined_data['orders']:
-        result['orders'] = pd.concat(combined_data['orders'], ignore_index=True)
-    else:
-        result['orders'] = pd.DataFrame()
+    orders = pd.concat(orders_list, ignore_index=True) if orders_list else pd.DataFrame(columns=["date","userid","orders"])
+    clients = pd.concat(clients_list, ignore_index=True) if orders_list else pd.DataFrame()
 
-    return result
-
-    
+    return {
+        "orders": orders,
+        "clients": clients
+    }
