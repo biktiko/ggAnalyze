@@ -22,7 +22,7 @@ def show(clever_data):
         ordersTab.show(data)
 
     with tab2:
-        st.write(data)
+        activationsTab.show(data)
         # if data["statistic"].empty:
         #     st.info("No statistics sheet found in any file.")
         # else:
