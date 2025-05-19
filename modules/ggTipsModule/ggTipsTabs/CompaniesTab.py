@@ -22,13 +22,12 @@ def _prep_companies_df(tips: pd.DataFrame) -> pd.DataFrame:
 
     # ── группировка ─────────────────────────────────────────────
     grouped = (
-        df.groupby("company", dropna=False, observed=True)
+        df.groupby("company_unified", dropna=False, observed=True)
           .agg(Amount=("amount", "sum"),
                Count=("uuid", "count"))
           .reset_index()
-          .rename(columns={"company": "Company"})
+          .rename(columns={"company_unified": "Company"})
     )
-
     # ── Scope ──────────────────────────────────────────────────
     one_avg_tip = df["amount"].mean() or 1          # защита от нуля
     grouped["Scope"] = ((grouped["Amount"] / one_avg_tip) + grouped["Count"]) / 2
