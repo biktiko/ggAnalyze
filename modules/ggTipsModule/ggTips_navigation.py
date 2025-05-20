@@ -276,9 +276,10 @@ def show_ggtips_sidebar_filters(data: dict):
 
         # Фильтрация компаний и отображение фильтров по дате
         if isCompanyWorking == 'Yes':
-            companies = companies[companies['working status'] == 'true']
-            if start_min is not None and start_max is not None:
-                chosen_start_range = st.date_input("Start date range", [], key="startDateRange")
+            if 'working status' not in companies.columns:
+                companies = companies[companies['working status'] == 'true']
+                if start_min is not None and start_max is not None:
+                    chosen_start_range = st.date_input("Start date range", [], key="startDateRange")
                 
         elif isCompanyWorking == 'No':
             companies = companies[companies['working status'] == 'false']
