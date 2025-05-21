@@ -1,5 +1,7 @@
 # C:\Users\user\OneDrive\Desktop\Workspace\ggAnalyze\app.py
 import streamlit as st
+st.set_page_config(layout='wide')
+
 from auth import login
 from modules import data_import, advanced
 from modules.ggTipsModule import ggTips
@@ -7,7 +9,6 @@ from modules.BusinessModule import ggBusiness
 from modules.ggModule import gg
 from modules.ggTipsModule import ggTips_navigation
 
-st.set_page_config(layout='wide')
 
 # Проверка аутентификации
 if not login():

@@ -3,137 +3,135 @@ import pandas as pd
 import altair as alt
 from datetime import datetime, timedelta
 import io
+from modules.BusinessModule.businessFilters import get_common_filters
+# from BusinessModule.businessFilters import get_common_filters
 
-# Optional: for advanced table features (column freezing, grouping)
-try:
-    from st_aggrid import AgGrid, GridOptionsBuilder
-    AGGRID_AVAILABLE = True
-except ImportError:
-    AGGRID_AVAILABLE = False
-
-
-def show(data: dict) -> None:
+def show(data: dict, filters: dict) -> None:
     """
     Tab "Orders" — daily analytics of company orders.
-    Expects data = {"orders": DataFrame, "clients": DataFrame}.
+    Принимает:
+      - data: {"orders": DataFrame, "clients": DataFrame}
+      - filters: результат get_common_filters()
     """
+    # распаковываем фильтры
+    min_avg          = filters["min_avg"]
+    last_days        = filters["last_days"]
+    date_range       = filters["date_range"]
+    download         = filters["download"]
+    include_weekends = filters["include_weekends"]
+    today            = filters["today"]
+    default_start    = filters["default_start"]
+
     st.subheader("Daily Orders per Company")
 
-    # Load data
-    orders = data.get("orders", pd.DataFrame()).copy()
+    orders  = data.get("orders", pd.DataFrame()).copy()
     clients = data.get("clients", pd.DataFrame()).copy()
     if orders.empty or clients.empty:
         st.info("Not enough data: please upload both 'orders' and 'clients'.")
         return
 
-    # Prepare dates and types
-    orders['date'] = pd.to_datetime(orders['date'], errors='coerce').dt.date
-    clients['userid'] = clients['userid'].astype(str)
-    clients['join_date'] = pd.to_datetime(clients.get('date'), errors='coerce').dt.date
+    # подготовка дат
+    orders["date"]      = pd.to_datetime(orders["date"], errors="coerce").dt.date
+    clients["userid"]   = clients["userid"].astype(str)
+    clients["join_date"]= pd.to_datetime(clients.get("date"), errors="coerce").dt.date
 
-    # Merge source tables
-    df = orders.merge(
-        clients[['userid', 'company', 'companymanager', 'join_date']],
-        left_on=orders['userid'].astype(str),
-        right_on='userid', how='left'
-    ).dropna(subset=['company'])
+    # объединяем данные
+    df = (
+        orders.merge(
+            clients[["userid","company","companymanager","join_date"]],
+            left_on=orders["userid"].astype(str),
+            right_on="userid", how="left"
+        )
+        .dropna(subset=["company"])
+    )
 
-    # Sidebar filters
-    st.sidebar.header('Filters')
-    min_avg = st.sidebar.number_input('Min. avg orders per day', 0.0, None, 1.0, 0.1)
-    last_days = st.sidebar.number_input('Companies joined in last N days', 0, None, 7)
-    today = datetime.today().date()
-    default_start = today - timedelta(days=30)
-    date_range = st.sidebar.date_input('Date range for table', value=(default_start, today))
-    download = st.sidebar.checkbox('Download Excel')
-
-    # Normalize date_range
-    if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
+    # разбираем дату
+    if isinstance(date_range, (list, tuple)) and len(date_range)==2:
         start_date, end_date = date_range
     else:
         start_date, end_date = default_start, today
 
-    # Filter original data by selected period
-    df_period = df[(df['date'] >= start_date) & (df['date'] <= end_date)]
+    # фильтруем по дате
+    df_period = df[(df["date"]>=start_date)&(df["date"]<=end_date)]
+    if not include_weekends:
+        df_period = df_period[pd.to_datetime(df_period["date"]).dt.weekday<5]
 
-    # Compute metrics per company
-    metrics = df_period.groupby('company', as_index=False).agg(
-        join_date=('join_date', 'min'),
-        manager=('companymanager', 'first'),
-        sum_orders=('orders', 'sum'),
-        days_active=('date', 'nunique')
+    # основные метрики
+    metrics = (
+        df_period.groupby("company", as_index=False)
+        .agg(
+            join_date   = ("join_date","min"),
+            manager     = ("companymanager","first"),
+            sum_orders  = ("orders","sum"),
+            days_active = ("date","nunique")
+        )
     )
-    metrics['avg_orders'] = (metrics['sum_orders'] / metrics['days_active']).round(2)
-    metrics['join_date'] = pd.to_datetime(metrics['join_date'])
+    metrics["avg_orders"]  = (metrics["sum_orders"]/metrics["days_active"]).round(2)
+    metrics["join_date"]   = pd.to_datetime(metrics["join_date"])
 
-    # Filter companies by avg or recent join
+    # фильтр по avg и дате подключения
     cutoff = today - timedelta(days=int(last_days))
-    mask = (metrics['avg_orders'] >= min_avg) | (metrics['join_date'].dt.date >= cutoff)
-    selected = metrics.loc[mask, 'company'].tolist() or metrics['company'].tolist()
+    mask   = (metrics["avg_orders"]>=min_avg)|(metrics["join_date"].dt.date>=cutoff)
+    selected = metrics.loc[mask, "company"].tolist() or metrics["company"].tolist()
 
-    # Build pivot for main table
+    # строим pivot-таблицу
     daily_sum = (
-        df_period[df_period['company'].isin(selected)]
-        .groupby(['company', 'date'], observed=True)['orders'].sum()
-        .reset_index()
+        df_period[df_period["company"].isin(selected)]
+        .groupby(["company","date"], observed=True)["orders"]
+        .sum().reset_index()
     )
-    pivot = daily_sum.pivot(index='company', columns='date', values='orders').fillna(0)
-    pivot.columns = [d.strftime('%d.%m.%Y') for d in pivot.columns]
+    pivot = daily_sum.pivot(index="company",columns="date",values="orders").fillna(0)
+    pivot.columns = [d.strftime("%d.%m.%Y") for d in pivot.columns]
 
-    # Compute last day orders
+    # последние заказы
     if not daily_sum.empty:
-        last_day = daily_sum['date'].max()
-        last_day_orders = daily_sum[daily_sum['date'] == last_day].set_index('company')['orders']
+        last_day    = daily_sum["date"].max()
+        last_orders = daily_sum[daily_sum["date"]==last_day].set_index("company")["orders"]
     else:
-        last_day_orders = pd.Series(dtype=int)
+        last_orders = pd.Series(dtype=int)
+    metrics["last orders"] = metrics["company"].map(last_orders).fillna(0).astype(int)
 
-    metrics['last orders'] = metrics['company'].map(last_day_orders).fillna(0).astype(int)
-
-    # Assemble result table
+    # финальная таблица
     result = (
-        metrics.set_index('company').loc[selected]
+        metrics.set_index("company").loc[selected]
         .join(pivot)
         .reset_index()
         .rename(columns={
-            'join_date': 'join date',
-            'sum_orders': 'sum',
-            'avg_orders': 'daily average'
+            "join_date":"join date",
+            "sum_orders":"sum",
+            "avg_orders":"daily average"
         })
     )
 
-    # Excel download
+    # скачивание Excel
     if download:
         buf = io.BytesIO()
-        result.to_excel(buf, index=False, sheet_name='Orders')
+        result.to_excel(buf, index=False, sheet_name="Orders")
         buf.seek(0)
         st.sidebar.download_button(
-            'Download Excel', buf,
-            'orders.xlsx',
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            "Download Excel", buf,
+            "orders.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
-    # Main table display
-    st.markdown('#### Companies and Daily Orders')
-    if AGGRID_AVAILABLE:
+    # отображение с AgGrid (если доступен)
+    st.markdown("#### Companies and Daily Orders")
+    try:
+        from st_aggrid import AgGrid, GridOptionsBuilder
         gb = GridOptionsBuilder.from_dataframe(result)
-        gb.configure_default_column(
-            resizable=True, sortable=True, filter=True,
-            min_column_width=80, enableRowGroup=True, pivot=True
-        )
-        gb.configure_column('company', pinned='left', width=150)
+        gb.configure_default_column(resizable=True, sortable=True, filter=True, min_column_width=80)
+        gb.configure_column("company", pinned="left", width=150)
         gb.configure_column(
-            'join date', pinned='left',
-            type=['dateColumnFilter', 'customDateTimeFormat'],
-            custom_format_string='dd.MM.yyyy', header_name='Join Date'
+            "join date",
+            pinned="left",
+            type=["dateColumnFilter","customDateTimeFormat"],
+            custom_format_string="dd.MM.yyyy",
+            header_name="Join Date"
         )
-        gb.configure_column('manager', header_name='Менеджер', enableRowGroup=True)
+        gb.configure_column("manager", header_name="Менеджер")
         grid_opts = gb.build()
-        AgGrid(
-            result, gridOptions=grid_opts,
-            fit_columns_on_grid_load=False, height=400,
-            enable_enterprise_modules=True
-        )
-    else:
+        AgGrid(result, gridOptions=grid_opts, height=400, enable_enterprise_modules=True)
+    except ImportError:
         st.dataframe(result, use_container_width=True, height=400)
 
     # Aggregated stats in tabs
