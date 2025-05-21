@@ -4,7 +4,7 @@ import altair as alt
 from datetime import datetime, timedelta
 import io
 
-# Optional: for advanced table features (column freezing)
+# Optional: for advanced table features (column freezing, grouping)
 try:
     from st_aggrid import AgGrid, GridOptionsBuilder
     AGGRID_AVAILABLE = True
@@ -19,117 +19,199 @@ def show(data: dict) -> None:
     """
     st.subheader("Daily Orders per Company")
 
-    # load data
+    # Load data
     orders = data.get("orders", pd.DataFrame()).copy()
     clients = data.get("clients", pd.DataFrame()).copy()
     if orders.empty or clients.empty:
         st.info("Not enough data: please upload both 'orders' and 'clients'.")
         return
 
-    # prepare dates and types
+    # Prepare dates and types
     orders['date'] = pd.to_datetime(orders['date'], errors='coerce').dt.date
     clients['userid'] = clients['userid'].astype(str)
     clients['join_date'] = pd.to_datetime(clients.get('date'), errors='coerce').dt.date
 
-    # merge datasets
+    # Merge source tables
     df = orders.merge(
-        clients[['userid','company','companymanager','join_date']],
+        clients[['userid', 'company', 'companymanager', 'join_date']],
         left_on=orders['userid'].astype(str),
         right_on='userid', how='left'
     ).dropna(subset=['company'])
 
-    # compute metrics per company
-    metrics = df.groupby('company', as_index=False).agg(
-        join_date=('join_date','min'),
-        manager=('companymanager','first'),
-        sum_orders=('orders','sum'),
-        days_active=('date','nunique')
-    )
-    metrics['avg_orders'] = (metrics['sum_orders']/metrics['days_active']).round(2)
-
-    # sidebar filters
+    # Sidebar filters
     st.sidebar.header('Filters')
     min_avg = st.sidebar.number_input('Min. avg orders per day', 0.0, None, 1.0, 0.1)
     last_days = st.sidebar.number_input('Companies joined in last N days', 0, None, 7)
     today = datetime.today().date()
     default_start = today - timedelta(days=30)
-    date_range = st.sidebar.date_input('Date range for table', [default_start, today])
+    date_range = st.sidebar.date_input('Date range for table', value=(default_start, today))
     download = st.sidebar.checkbox('Download Excel')
 
-    # select companies for table
+    # Normalize date_range
+    if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
+        start_date, end_date = date_range
+    else:
+        start_date, end_date = default_start, today
+
+    # Filter original data by selected period
+    df_period = df[(df['date'] >= start_date) & (df['date'] <= end_date)]
+
+    # Compute metrics per company
+    metrics = df_period.groupby('company', as_index=False).agg(
+        join_date=('join_date', 'min'),
+        manager=('companymanager', 'first'),
+        sum_orders=('orders', 'sum'),
+        days_active=('date', 'nunique')
+    )
+    metrics['avg_orders'] = (metrics['sum_orders'] / metrics['days_active']).round(2)
+    metrics['join_date'] = pd.to_datetime(metrics['join_date'])
+
+    # Filter companies by avg or recent join
     cutoff = today - timedelta(days=int(last_days))
-    mask = (metrics['avg_orders'] >= min_avg) | (metrics['join_date'] >= cutoff)
+    mask = (metrics['avg_orders'] >= min_avg) | (metrics['join_date'].dt.date >= cutoff)
     selected = metrics.loc[mask, 'company'].tolist() or metrics['company'].tolist()
 
-    # pivot table data
-    daily_sum = df.groupby(['company','date'], observed=True)['orders'].sum().reset_index()
-    pivot = (
-        daily_sum[daily_sum['company'].isin(selected)]
-        .pivot(index='company', columns='date', values='orders').fillna(0)
+    # Build pivot for main table
+    daily_sum = (
+        df_period[df_period['company'].isin(selected)]
+        .groupby(['company', 'date'], observed=True)['orders'].sum()
+        .reset_index()
     )
-    if not pivot.columns.empty:
-        last_date = pivot.columns.max()
-        last_day_orders = daily_sum[daily_sum['date'] == last_date].set_index('company')['orders']
+    pivot = daily_sum.pivot(index='company', columns='date', values='orders').fillna(0)
+    pivot.columns = [d.strftime('%d.%m.%Y') for d in pivot.columns]
+
+    # Compute last day orders
+    if not daily_sum.empty:
+        last_day = daily_sum['date'].max()
+        last_day_orders = daily_sum[daily_sum['date'] == last_day].set_index('company')['orders']
     else:
         last_day_orders = pd.Series(dtype=int)
 
-    # apply date filter
-    start_date, end_date = (date_range if isinstance(date_range, list) and len(date_range) == 2 else (default_start, today))
-    pivot = pivot.loc[:, pivot.columns.to_series().between(start_date, end_date)]
-    pivot.columns = [d.strftime('%d.%m.%Y') for d in pivot.columns]
-
-    # combine metrics and pivot
     metrics['last orders'] = metrics['company'].map(last_day_orders).fillna(0).astype(int)
+
+    # Assemble result table
     result = (
         metrics.set_index('company').loc[selected]
-        .join(pivot).reset_index()
+        .join(pivot)
+        .reset_index()
+        .rename(columns={
+            'join_date': 'join date',
+            'sum_orders': 'sum',
+            'avg_orders': 'daily average'
+        })
     )
-    result['join_date'] = pd.to_datetime(result['join_date']).dt.strftime('%d.%m.%Y')
-    result.rename(columns={
-        'join_date':'join date',
-        'sum_orders':'sum',
-        'avg_orders':'daily average',
-        'last orders':'last orders'
-    }, inplace=True)
 
-    # download Excel
+    # Excel download
     if download:
         buf = io.BytesIO()
         result.to_excel(buf, index=False, sheet_name='Orders')
         buf.seek(0)
-        st.sidebar.download_button('Download Excel', buf, 'orders.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        st.sidebar.download_button(
+            'Download Excel', buf,
+            'orders.xlsx',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
 
-    # display table
+    # Main table display
     st.markdown('#### Companies and Daily Orders')
     if AGGRID_AVAILABLE:
         gb = GridOptionsBuilder.from_dataframe(result)
-        freeze_cols = ['company','join date','manager','sum','daily average','last orders']
-        for c in freeze_cols:
-            gb.configure_column(c, pinned='left')
-        gb.configure_column('company', width=50)
-        gb.configure_default_column(resizable=True, sortable=True, filter=True, min_column_width=80)
+        gb.configure_default_column(
+            resizable=True, sortable=True, filter=True,
+            min_column_width=80, enableRowGroup=True, pivot=True
+        )
+        gb.configure_column('company', pinned='left', width=150)
+        gb.configure_column(
+            'join date', pinned='left',
+            type=['dateColumnFilter', 'customDateTimeFormat'],
+            custom_format_string='dd.MM.yyyy', header_name='Join Date'
+        )
+        gb.configure_column('manager', header_name='Менеджер', enableRowGroup=True)
         grid_opts = gb.build()
-        AgGrid(result, gridOptions=grid_opts, fit_columns_on_grid_load=False, height=400)
+        AgGrid(
+            result, gridOptions=grid_opts,
+            fit_columns_on_grid_load=False, height=400,
+            enable_enterprise_modules=True
+        )
     else:
         st.dataframe(result, use_container_width=True, height=400)
 
-    # bottom chart: daily orders trend
+    # Aggregated stats in tabs
     st.markdown('---')
-    st.markdown('#### Daily Orders Trend')
-    chart_companies = st.multiselect('Select companies for chart', options=metrics['company'].tolist(), default=[])
-    if chart_companies:
-        chart_df = daily_sum[daily_sum['company'].isin(chart_companies)]
-        chart_df = chart_df[(chart_df['date'] >= start_date) & (chart_df['date'] <= end_date)]
-        chart = (alt.Chart(chart_df)
+    st.markdown('#### Aggregated Statistics')
+    tabs = st.tabs(["По дням", "По неделям", "По месяцам"])
+
+    # Function to create stats tab
+    def stats_tab(df_input, period_col, title_col):
+        stats = df_input.groupby(period_col, as_index=False)['orders'].sum().rename(columns={period_col: title_col})
+        # Chart with impute to show zeros
+        chart = (alt.Chart(stats)
+                 .transform_impute(
+                     impute='orders',
+                     key=title_col,
+                     groupby=['company'],
+                     value=0
+                 )
                  .mark_line(point=True)
                  .encode(
-                     x=alt.X('date:T', title='Date'),
-                     y=alt.Y('orders:Q', title='Orders', axis=alt.Axis(format='d', tickMinStep=1)),
+                     x=alt.X(f'{title_col}:T', title=title_col.title()),
+                     y=alt.Y('orders:Q', title='Orders'),
                      color=alt.Color('company:N', title='Company'),
-                     tooltip=[alt.Tooltip('date:T', title='Date'), alt.Tooltip('company:N', title='Company'), alt.Tooltip('orders:Q', title='Orders')]
+                     tooltip=[alt.Tooltip(f'{title_col}:T'), alt.Tooltip('orders:Q'), alt.Tooltip('company:N')]
                  )
                  .properties(height=300)
         )
         st.altair_chart(chart, use_container_width=True)
+        st.download_button(f'Download {title_col} Stats', stats.to_csv(index=False).encode(), f'{title_col}_stats.csv', 'text/csv')
+        st.dataframe(stats, use_container_width=True)
+
+    # Daily
+    with tabs[0]:
+        st.subheader("Статистика по дням")
+        stats_tab(daily_sum, 'date', 'date')
+
+    # Weekly
+    with tabs[1]:
+        st.subheader("Статистика по неделям")
+        week_df = daily_sum.copy()
+        week_df['week_start'] = pd.to_datetime(week_df['date']).dt.to_period('W').apply(lambda r: r.start_time.date())
+        stats_tab(week_df, 'week_start', 'week start')
+
+    # Monthly
+    with tabs[2]:
+        st.subheader("Статистика по месяцам")
+        month_df = daily_sum.copy()
+        month_df['month_start'] = pd.to_datetime(month_df['date']).dt.to_period('M').apply(lambda r: r.start_time.date())
+        stats_tab(month_df, 'month_start', 'month start')
+
+    # Bottom trend chart and table
+    st.markdown('---')
+    st.markdown('#### Orders Trend by Company')
+    selected_companies = st.multiselect(
+        'Select companies for trend', options=metrics['company'].tolist(), default=[]
+    )
+    if selected_companies:
+        # Aggregate and fill missing dates
+        trend = df_period[df_period['company'].isin(selected_companies)].groupby(['company', 'date'], as_index=False)['orders'].sum()
+        # create complete frame
+        all_dates = pd.date_range(start_date, end_date).date
+        idx = pd.MultiIndex.from_product([selected_companies, all_dates], names=['company', 'date'])
+        trend_full = trend.set_index(['company', 'date']).reindex(idx, fill_value=0).reset_index()
+        # Chart
+        chart_trend = (alt.Chart(trend_full)
+                       .mark_line(point=True)
+                       .encode(
+                           x=alt.X('date:T', title='Date'),
+                           y=alt.Y('orders:Q', title='Orders'),
+                           color=alt.Color('company:N'),
+                           tooltip=[alt.Tooltip('date:T'), alt.Tooltip('company:N'), alt.Tooltip('orders:Q')]
+                       )
+                       .properties(height=300)
+        )
+        st.altair_chart(chart_trend, use_container_width=True)
+        # Table
+        st.dataframe(trend_full, use_container_width=True)
+        # Download
+        st.download_button('Download Trend Data', trend_full.to_csv(index=False).encode(), 'trend_data.csv', 'text/csv')
     else:
-        st.info('Select at least one company to display the trend chart.')
+        st.info('Select at least one company to view trend.')

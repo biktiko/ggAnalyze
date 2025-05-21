@@ -48,8 +48,8 @@ def show(data: dict | None = None) -> None:
 
     df = grp_a.join(grp_b, how="outer").fillna(0).reset_index()
 
-    days_a = (pd.to_datetime(period_a[1]) - pd.to_datetime(period_a[0])).days or 1
-    days_b = (pd.to_datetime(period_b[1]) - pd.to_datetime(period_b[0])).days or 1
+    days_a = (pd.to_datetime(period_a[1]) - pd.to_datetime(period_a[0])).days + 1
+    days_b = (pd.to_datetime(period_b[1]) - pd.to_datetime(period_b[0])).days + 1
 
     df["Scope_A"] = df["Orders_A"] / days_a
     df["Scope_B"] = df["Orders_B"] / days_b
