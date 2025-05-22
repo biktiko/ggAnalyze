@@ -165,23 +165,24 @@ def show(data: dict, filters: dict) -> None:
 
     # Daily
     with tabs[0]:
-        st.subheader("Статистика по дням")
+        st.subheader("Daily stats")
         stats_tab(daily_sum, 'date', 'date')
 
     # Weekly
     with tabs[1]:
-        st.subheader("Статистика по неделям")
+        st.subheader("Weekly stats")
         week_df = daily_sum.copy()
         week_df['week_start'] = pd.to_datetime(week_df['date']).dt.to_period('W').apply(lambda r: r.start_time.date())
         stats_tab(week_df, 'week_start', 'week start')
 
     # Monthly
     with tabs[2]:
-        st.subheader("Статистика по месяцам")
+        st.subheader("Monthly stats")
         month_df = daily_sum.copy()
         month_df['month_start'] = pd.to_datetime(month_df['date']).dt.to_period('M').apply(lambda r: r.start_time.date())
         stats_tab(month_df, 'month_start', 'month start')
 
+    
     # Bottom trend chart and table
     st.markdown('---')
     st.markdown('#### Orders Trend by Company')
@@ -190,26 +191,100 @@ def show(data: dict, filters: dict) -> None:
     )
     if selected_companies:
         # Aggregate and fill missing dates
-        trend = df_period[df_period['company'].isin(selected_companies)].groupby(['company', 'date'], as_index=False)['orders'].sum()
-        # create complete frame
-        all_dates = pd.date_range(start_date, end_date).date
-        idx = pd.MultiIndex.from_product([selected_companies, all_dates], names=['company', 'date'])
-        trend_full = trend.set_index(['company', 'date']).reindex(idx, fill_value=0).reset_index()
+        trend = (
+            df_period[df_period['company'].isin(selected_companies)]
+            .groupby(['company', 'date'], as_index=False)['orders']
+            .sum()
+        )
+
+        # создаём полный ряд дат с учётом include_weekends
+        if include_weekends:
+            all_dates = pd.date_range(start_date, end_date).date
+        else:
+            # бизнес-дни (понедельник–пятница)
+            all_dates = pd.bdate_range(start_date, end_date).date
+
+        idx = pd.MultiIndex.from_product(
+            [selected_companies, all_dates],
+            names=['company', 'date']
+        )
+        trend_full = (
+            trend.set_index(['company', 'date'])
+                .reindex(idx, fill_value=0)
+                .reset_index()
+        )
+
         # Chart
-        chart_trend = (alt.Chart(trend_full)
-                       .mark_line(point=True)
-                       .encode(
-                           x=alt.X('date:T', title='Date'),
-                           y=alt.Y('orders:Q', title='Orders'),
-                           color=alt.Color('company:N'),
-                           tooltip=[alt.Tooltip('date:T'), alt.Tooltip('company:N'), alt.Tooltip('orders:Q')]
-                       )
-                       .properties(height=300)
+        chart_trend = (
+            alt.Chart(trend_full)
+            .mark_line(point=True)
+            .encode(
+                x=alt.X('date:T', title='Date'),
+                y=alt.Y('orders:Q', title='Orders'),
+                color=alt.Color('company:N'),
+                tooltip=[
+                    alt.Tooltip('date:T'),
+                    alt.Tooltip('company:N'),
+                    alt.Tooltip('orders:Q')
+                ]
+            )
+            .properties(height=300)
         )
         st.altair_chart(chart_trend, use_container_width=True)
-        # Table
+
+        # Table и download…
         st.dataframe(trend_full, use_container_width=True)
-        # Download
-        st.download_button('Download Trend Data', trend_full.to_csv(index=False).encode(), 'trend_data.csv', 'text/csv')
+        st.download_button(
+            'Download Trend Data',
+            trend_full.to_csv(index=False).encode(),
+            'trend_data.csv',
+            'text/csv'
+        )
+
+        # ------ новый блок: метрика по дням недели ------
+        # 1) отфильтруем диапазон по датам, но без учёта include_weekends
+        df_range = df[
+            (df["date"] >= start_date) &
+            (df["date"] <= end_date) &
+            (df["company"].isin(selected_companies))
+        ].copy()
+
+        # 2) вычисляем имя дня недели
+        df_range['weekday'] = pd.to_datetime(df_range['date']).dt.day_name(locale='en_US')
+
+        # 3) суммируем заказы по (компания, день недели)
+        weekday_stats = (
+            df_range
+            .groupby(['company', 'weekday'], as_index=False)['orders']
+            .sum()
+        )
+
+        # 4) приводим к "красивому" порядку столбцов
+        order = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
+        weekday_pivot = (
+            weekday_stats
+            .pivot(index='company', columns='weekday', values='orders')
+            .reindex(columns=order, fill_value=0)
+            .reset_index()
+        )
+
+        trend = (
+            df_period[df_period['company'].isin(selected_companies)]
+            .groupby(['company', 'date'], as_index=False)['orders']
+            .sum()
+        )
+
+        # 5) выводим таблицу
+        st.dataframe(weekday_pivot, use_container_width=True, height=300)
+        # -----------------------------------------------
+
+        # … здесь ваш существующий блок с трендом …
+        # Aggregate and fill missing dates
+        trend = (
+            df_period[df_period['company'].isin(selected_companies)]
+            .groupby(['company', 'date'], as_index=False)['orders']
+            .sum()
+        )
+        # …
     else:
         st.info('Select at least one company to view trend.')
