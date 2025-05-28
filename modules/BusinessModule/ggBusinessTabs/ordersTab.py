@@ -4,7 +4,6 @@ import altair as alt
 from datetime import datetime, timedelta
 import io
 from modules.BusinessModule.businessFilters import get_common_filters
-# from BusinessModule.businessFilters import get_common_filters
 
 def show(data: dict, filters: dict) -> None:
     """
@@ -30,78 +29,86 @@ def show(data: dict, filters: dict) -> None:
         st.info("Not enough data: please upload both 'orders' and 'clients'.")
         return
 
-    # подготовка дат
+    # подготовка дат и типов
     orders["date"]      = pd.to_datetime(orders["date"], errors="coerce").dt.date
     clients["userid"]   = clients["userid"].astype(str)
+    clients["mobile"]   = clients["mobile"].astype(str)
+    clients["companymanager"] = clients["companymanager"].astype(str)
     clients["join_date"]= pd.to_datetime(clients.get("date"), errors="coerce").dt.date
 
     # объединяем данные
     df = (
         orders.merge(
-            clients[["userid","company","companymanager","join_date"]],
+            clients[["userid","company","companymanager","join_date","mobile"]],
             left_on=orders["userid"].astype(str),
-            right_on="userid", how="left"
+            right_on="userid",
+            how="left"
         )
         .dropna(subset=["company"])
     )
 
-    # разбираем дату
-    if isinstance(date_range, (list, tuple)) and len(date_range)==2:
+    # разбираем дату-фильтры
+    if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
         start_date, end_date = date_range
     else:
         start_date, end_date = default_start, today
 
-    # фильтруем по дате
-    df_period = df[(df["date"]>=start_date)&(df["date"]<=end_date)]
+    df_period = df[(df["date"] >= start_date) & (df["date"] <= end_date)]
     if not include_weekends:
-        df_period = df_period[pd.to_datetime(df_period["date"]).dt.weekday<5]
+        df_period = df_period[pd.to_datetime(df_period["date"]).dt.weekday < 5]
 
-    # основные метрики
+    # основные метрики, включая userid
     metrics = (
         df_period.groupby("company", as_index=False)
         .agg(
-            join_date   = ("join_date","min"),
+            userid      = ("userid",        "first"),
+            join_date   = ("join_date",     "min"),
             manager     = ("companymanager","first"),
-            sum_orders  = ("orders","sum"),
-            days_active = ("date","nunique")
+            sum_orders  = ("orders",        "sum"),
+            days_active = ("date",          "nunique"),
         )
     )
-    metrics["avg_orders"]  = (metrics["sum_orders"]/metrics["days_active"]).round(2)
-    metrics["join_date"]   = pd.to_datetime(metrics["join_date"])
+    metrics["avg_orders"] = (metrics["sum_orders"] / metrics["days_active"]).round(2)
+    metrics["join_date"]  = pd.to_datetime(metrics["join_date"])
 
     # фильтр по avg и дате подключения
     cutoff = today - timedelta(days=int(last_days))
-    mask   = (metrics["avg_orders"]>=min_avg)|(metrics["join_date"].dt.date>=cutoff)
+    mask   = (metrics["avg_orders"] >= min_avg) | (metrics["join_date"].dt.date >= cutoff)
     selected = metrics.loc[mask, "company"].tolist() or metrics["company"].tolist()
 
-    # строим pivot-таблицу
+    # pivot-таблица с суммой заказов за каждый день
     daily_sum = (
         df_period[df_period["company"].isin(selected)]
         .groupby(["company","date"], observed=True)["orders"]
-        .sum().reset_index()
+        .sum()
+        .reset_index()
     )
-    pivot = daily_sum.pivot(index="company",columns="date",values="orders").fillna(0)
+    pivot = daily_sum.pivot(index="company", columns="date", values="orders").fillna(0)
     pivot.columns = [d.strftime("%d.%m.%Y") for d in pivot.columns]
 
     # последние заказы
     if not daily_sum.empty:
         last_day    = daily_sum["date"].max()
-        last_orders = daily_sum[daily_sum["date"]==last_day].set_index("company")["orders"]
+        last_orders = daily_sum[daily_sum["date"] == last_day].set_index("company")["orders"]
     else:
         last_orders = pd.Series(dtype=int)
     metrics["last orders"] = metrics["company"].map(last_orders).fillna(0).astype(int)
 
-    # финальная таблица
+    # сборка итоговой таблицы
     result = (
-        metrics.set_index("company").loc[selected]
+        metrics.set_index("company")
+        .loc[selected]
         .join(pivot)
         .reset_index()
         .rename(columns={
-            "join_date":"join date",
-            "sum_orders":"sum",
-            "avg_orders":"daily average"
+            "join_date":   "join date",
+            "sum_orders":  "sum",
+            "avg_orders":  "daily average"
         })
     )
+
+    # перемещаем колонку userid в начало
+    result.insert(0, "userid", result.pop("userid"))
 
     # скачивание Excel
     if download:
@@ -114,21 +121,21 @@ def show(data: dict, filters: dict) -> None:
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
-    # отображение с AgGrid (если доступен)
+    # отображение с AgGrid (если доступно)
     st.markdown("#### Companies and Daily Orders")
     try:
         from st_aggrid import AgGrid, GridOptionsBuilder
         gb = GridOptionsBuilder.from_dataframe(result)
         gb.configure_default_column(resizable=True, sortable=True, filter=True, min_column_width=80)
-        gb.configure_column("company", pinned="left", width=150)
+        gb.configure_column("userid", pinned="left", header_name="User ID", width=120)
+        gb.configure_column("company", pinned="left", width=100)
         gb.configure_column(
             "join date",
             pinned="left",
             type=["dateColumnFilter","customDateTimeFormat"],
-            custom_format_string="dd.MM.yyyy",
-            header_name="Join Date"
+            custom_format_string="dd.MM.yyyy"
         )
-        gb.configure_column("manager", header_name="Менеджер")
+        gb.configure_column("manager", header_name="Manager")
         grid_opts = gb.build()
         AgGrid(result, gridOptions=grid_opts, height=400, enable_enterprise_modules=True)
     except ImportError:

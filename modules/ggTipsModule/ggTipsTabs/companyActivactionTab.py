@@ -216,7 +216,6 @@ def show(data: dict | None = None) -> None:
         else:
             st.markdown("**Overall, there are no changes** (average change per company 0.00).")
 
-
     st.altair_chart(
         chart.resolve_scale(x="shared").configure_axis(
             labelColor="white", titleColor="white"
