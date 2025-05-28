@@ -198,6 +198,25 @@ def show(data: dict | None = None) -> None:
             alt.datum[diff_col] >= 0, alt.value("green"), alt.value("red")
         )
     )
+
+    total_diff = df["DiffNum"].sum()
+    avg_diff = df["DiffNum"].mean().round(2)
+
+    with st.expander("Overall Summary", expanded=False):
+        if total_diff > 0:
+            st.markdown(
+                f"Overall, companies have become **more active** by a total of {total_diff:.2f} points "
+                f"(average change per company {avg_diff:+.2f})."
+            )
+        elif total_diff < 0:
+            st.markdown(
+                f"Overall, companies have become **less active** by a total of {abs(total_diff):.2f} points "
+                f"(average change per company {avg_diff:+.2f})."
+            )
+        else:
+            st.markdown("**Overall, there are no changes** (average change per company 0.00).")
+
+
     st.altair_chart(
         chart.resolve_scale(x="shared").configure_axis(
             labelColor="white", titleColor="white"
