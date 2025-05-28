@@ -18,53 +18,56 @@ def show(data: dict | None = None) -> None:
     today = pd.to_datetime("today").normalize()
 
     # ─── 2) Pivot & Heatmap Config ──────────────────────────────────────────────
+
     with st.expander("Config pivot & heatmap", expanded=True):
         agg_type    = st.selectbox("Value type", ["Count", "Amount"])
-        top_n       = st.number_input("Top N users to display", 1, 1000, 15)
+        top_n       = st.number_input("Top N users to display", 1, 10000, 100)
         thresh      = st.number_input("Min total per user",
                                       min_value=0.0,
                                       max_value=float(tips["amount"].max()),
                                       value=0.0)
 
+
     # ─── 3) Pivot-таблица ───────────────────────────────────────────────────────
-    pivot = pd.pivot_table(
-        tips,
-        index="payer",
-        columns="company",
-        values="amount",
-        aggfunc="count" if agg_type=="Count" else "sum",
-        fill_value=0
-    )
-    pivot["__Total"] = pivot.sum(axis=1)
-    pivot = (
-        pivot[pivot["__Total"] >= thresh]
-             .sort_values("__Total", ascending=False)
-             .head(top_n)
-             .drop(columns="__Total")
-    )
-    st.write(f"Top {len(pivot)} users ({agg_type}), ≥{thresh:.0f}")
-    st.dataframe(pivot, use_container_width=True)
-
-    df_heat = pivot.reset_index().melt("payer", var_name="Company", value_name="Value")
-    heatmap = (
-        alt.Chart(df_heat)
-        .mark_rect()
-        .encode(
-            x="Company:N",
-            y=alt.Y("payer:O", sort=pivot.index.astype(str).tolist()),
-            color=alt.Color(
-                "Value:Q",
-                scale=alt.Scale(
-                    range=["#ffffff", "#00008b"]  # от чисто-белого до тёмно-синего
-                ),
-                legend=alt.Legend(title=agg_type)
-            ),
-            tooltip=["payer:N", "Company:N", "Value:Q"]
+    with st.expander("Pivot table", expanded=True):
+        pivot = pd.pivot_table(
+            tips,
+            index="payer",
+            columns="company",
+            values="amount",
+            aggfunc="count" if agg_type=="Count" else "sum",
+            fill_value=0
         )
-        .properties(height=30 * len(pivot), width=700)
-    )
+        pivot["__Total"] = pivot.sum(axis=1)
+        pivot = (
+            pivot[pivot["__Total"] >= thresh]
+                .sort_values("__Total", ascending=False)
+                .head(top_n)
+                .drop(columns="__Total")
+        )
+        st.write(f"Top {len(pivot)} users ({agg_type}), ≥{thresh:.0f}")
+        st.dataframe(pivot, use_container_width=True)
 
-    st.altair_chart(heatmap, use_container_width=True)
+        df_heat = pivot.reset_index().melt("payer", var_name="Company", value_name="Value")
+        heatmap = (
+            alt.Chart(df_heat)
+            .mark_rect()
+            .encode(
+                x="Company:N",
+                y=alt.Y("payer:O", sort=pivot.index.astype(str).tolist()),
+                color=alt.Color(
+                    "Value:Q",
+                    scale=alt.Scale(
+                        range=["#ffffff", "#00008b"]  # от чисто-белого до тёмно-синего
+                    ),
+                    legend=alt.Legend(title=agg_type)
+                ),
+                tooltip=["payer:N", "Company:N", "Value:Q"]
+            )
+            .properties(height=30 * len(pivot), width=700)
+        )
+
+        st.altair_chart(heatmap, use_container_width=True)
 
     # ─── 4) Настройки «регулярности» ─────────────────────────────────────────────
     with st.expander("Config activity metrics", expanded=True):
