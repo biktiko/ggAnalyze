@@ -14,7 +14,7 @@ GG_TEAMMATES_SHEETS    = {"gg teammates", "ggteammates"}
 ORDERS_COUNT_SHEETS    = {"orders count"}
 clients_SHEETS       = {"clients"}
 # New identifiers for serve orders and cancellations
-ORDERS_HISTORY_COLUMN = "accepted_interval"
+ORDERS_HISTORY_COLUMN = {"acceptedinterval", "accepted_interval"}
 CANCELLATIONS_COLUMN  = "canceldate"
 # ──────────────────────────────────────────────────────────────────────────────
 # Логирование
@@ -121,6 +121,7 @@ def load_data_from_file(path: str) -> dict:
 
             # check for serve orders and cancellation sheets by column names
             cols = set(df.columns.str.lower())
+            logger.info(f"Processing sheet: {sheet} (columns: {cols})")
             if ORDERS_HISTORY_COLUMN in cols:
                 if "orderdate1" in df.columns:
                     df["orderdate1"] = pd.to_datetime(
