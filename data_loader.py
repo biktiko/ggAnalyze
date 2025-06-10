@@ -14,8 +14,11 @@ GG_TEAMMATES_SHEETS    = {"gg teammates", "ggteammates"}
 ORDERS_COUNT_SHEETS    = {"orders count"}
 clients_SHEETS       = {"clients"}
 # New identifiers for serve orders and cancellations
-ORDERS_HISTORY_COLUMN = "accepted_interval"
-CANCELLATIONS_COLUMN  = "canceldate"
+# After ``standardize_columns`` the column ``accepted_interval`` becomes
+# ``acceptedinterval`` (underscores removed).  We detect sheets by the
+# presence of this normalised name.
+ORDERS_HISTORY_COLUMNS = {"acceptedinterval", "accepted_interval"}
+CANCELLATIONS_COLUMN = "canceldate"
 # ──────────────────────────────────────────────────────────────────────────────
 # Логирование
 # ──────────────────────────────────────────────────────────────────────────────
@@ -31,6 +34,8 @@ def normalize_column(col: str) -> str:
 def standardize_columns(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df.columns = df.columns.astype(str)
+    # drop automatically generated index columns like 'Unnamed: 0'
+    df = df.loc[:, ~df.columns.str.lower().str.startswith('unnamed')]
     mapping = {}
     for col in df.columns:
         norm = normalize_column(col)
@@ -121,7 +126,7 @@ def load_data_from_file(path: str) -> dict:
 
             # check for serve orders and cancellation sheets by column names
             cols = set(df.columns.str.lower())
-            if ORDERS_HISTORY_COLUMN in cols:
+            if ORDERS_HISTORY_COLUMNS.intersection(cols):
                 if "orderdate1" in df.columns:
                     df["orderdate1"] = pd.to_datetime(
                         df["orderdate1"], format="%d/%m/%Y/%H:%M", errors="coerce"
