@@ -32,12 +32,12 @@ def _calc_stats(series: pd.Series) -> dict:
     if series.empty:
         return {"Average": None, "Median": None, "Skew": None, "stDeviation": None, "Min": None, "Max": None}
     return {
-        "Average": series.mean(),
-        "Median": series.median(),
+        "Average": series.mean().__round__(1),
+        "Median": series.median().__round__(1),
         "Skew": series.skew() if len(series) > 2 else 0,
         "stDeviation": series.std(),
-        "Min": series.min(),
-        "Max": series.max(),
+        "Min": series.min().__round__(0),
+        "Max": series.max().__round__(0),
     }
 
 
@@ -59,12 +59,22 @@ def show(data: dict, filters: dict) -> None:
     orders["arrived_minutes"] = orders.get("arrivedinterval").apply(_parse_interval_seconds) / 60.0
     orders["distance"] = pd.to_numeric(orders.get("distance"), errors="coerce")
     orders["fare"] = pd.to_numeric(orders.get("fare"), errors="coerce")
+    
+    if "phonenumber" in orders.columns:
+        cancels = cancels[cancels["usermobile"].isin(orders["usermobile"])]
 
     if not cancels.empty:
-        cancels = cancels[cancels.get("userid").isin(orders.get("userid"))]
-        cancels["createdat"] = pd.to_datetime(cancels.get("createdat"), errors="coerce")
-        cancels["canceldate"] = pd.to_datetime(cancels.get("canceldate"), errors="coerce")
-        cancels["wait_sec"] = (cancels["canceldate"] - cancels["createdat"]).dt.total_seconds()
+
+        if "date" in cancels.columns:
+            cancels["date"] = pd.to_datetime(cancels["date"], errors="coerce")
+        else:
+            cancels["date"] = pd.NaT
+
+        if "canceldate" in cancels.columns:
+            cancels["canceldate"] = pd.to_datetime(cancels["canceldate"], errors="coerce")
+        else:
+            cancels["canceldate"] = pd.NaT
+        cancels["wait_sec"] = (cancels["canceldate"] - cancels["date"]).dt.total_seconds() 
     else:
         cancels = pd.DataFrame(columns=["userid", "wait_sec"])
 
@@ -80,8 +90,7 @@ def show(data: dict, filters: dict) -> None:
         orders = orders[(orders["orderdate1"] >= start) & (orders["orderdate1"] <= end)]
     if selected_profiles and "profileid" in orders.columns:
         orders = orders[orders["profileid"].astype(str).isin(selected_profiles)]
-    cancels = cancels[cancels["userid"].isin(orders["userid"])]
-
+    
     # Stats excluding cancels
     stats_excl = {
         "Accepted time (sec)": _calc_stats(orders["accepted_seconds"]),
@@ -105,8 +114,16 @@ def show(data: dict, filters: dict) -> None:
     metrics_df_incl = pd.DataFrame([stats_incl]).T
     metrics_df_incl.columns = ["Including cancels"]
 
-    st.markdown("### Metrics without cancels")
-    st.dataframe(metrics_df)
+    if not cancels.empty:
+        st.markdown("### Metrics without cancels")
+        st.dataframe(metrics_df)
 
     st.markdown("### Accepted time including cancels")
     st.dataframe(metrics_df_incl)
+
+    st.write('orders history')
+    st.write(orders)
+
+    st.write('cancellations history')
+    st.write(cancels)
+

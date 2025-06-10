@@ -338,10 +338,11 @@ def get_combined_data(session_data) -> dict:
     cancellations = pd.DataFrame()
     for d in items:
         df = d.get("cancellations", pd.DataFrame())
+        logger.info(f"Found cancellations is {df}")
         if not df.empty:
             cancellations = df
             break
-
+    
     return {
         "ggtips": combined_tips,
         "ggtipsCompanies": companies,
