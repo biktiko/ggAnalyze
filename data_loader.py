@@ -14,7 +14,9 @@ GG_TEAMMATES_SHEETS    = {"gg teammates", "ggteammates"}
 ORDERS_COUNT_SHEETS    = {"orders count"}
 clients_SHEETS       = {"clients"}
 # New identifiers for serve orders and cancellations
-ORDERS_HISTORY_COLUMN = {"acceptedinterval", "accepted_interval"}
+# Columns may come in various forms like "AcceptedInterval" or "accepted_interval".
+# Use the normalized name that ``standardize_columns`` would produce.
+ORDERS_HISTORY_COLUMN = "acceptedinterval"
 CANCELLATIONS_COLUMN  = "canceldate"
 # ──────────────────────────────────────────────────────────────────────────────
 # Логирование
@@ -117,11 +119,30 @@ def load_data_from_file(path: str) -> dict:
         for sheet in xls.sheet_names:
             sl = sheet.lower()
             df = pd.read_excel(xls, sheet_name=sheet)
+            # Drop any automatically generated "Unnamed" columns
+
+            df.columns = df.columns.map(str)                 # все имена → строка
+            def drop_unnamed(df: pd.DataFrame) -> pd.DataFrame:
+                # 1) Приводим все имена столбцов к строкам
+                col_strs = [str(col) for col in df.columns]
+
+                # 2) Собираем булеву маску: True там, где имя начинается на "unnamed"
+                mask = [name.lower().startswith("unnamed") for name in col_strs]
+
+                # 3) Перезаписываем в DataFrame «чистые» строковые имена
+                df.columns = col_strs
+
+                # 4) Фильтруем по позиции: оставляем те, у которых mask==False
+                #    Через iloc здесь надёжнее, чем через loc, чтобы не было выравнивания по ярлыкам
+                keep_idxs = [i for i, is_unnamed in enumerate(mask) if not is_unnamed]
+                return df.iloc[:, keep_idxs]
+
+
+            df = drop_unnamed(pd.read_excel(xls, sheet_name=sheet))
             df = standardize_columns(df)
 
             # check for serve orders and cancellation sheets by column names
             cols = set(df.columns.str.lower())
-            logger.info(f"Processing sheet: {sheet} (columns: {cols})")
             if ORDERS_HISTORY_COLUMN in cols:
                 if "orderdate1" in df.columns:
                     df["orderdate1"] = pd.to_datetime(
@@ -186,6 +207,7 @@ def load_data_from_file(path: str) -> dict:
     elif ext == "csv":
         # если нужен CSV
         df = pd.read_csv(path)
+        df = df.loc[:, ~df.columns.str.lower().str.startswith("unnamed")]
         df = standardize_columns(df)
         if "date" in df.columns:
             df["date"] = robust_parse_dates(df["date"], path)
