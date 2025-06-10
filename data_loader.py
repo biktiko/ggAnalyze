@@ -51,7 +51,12 @@ def standardize_columns(df: pd.DataFrame) -> pd.DataFrame:
             df[col] = df[col].astype(str).str.lower()
         else:
             mapping[col] = norm
-    return df.rename(columns=mapping)
+    df = df.rename(columns=mapping)
+    if df.columns.duplicated().any():
+        dupes = list(df.columns[df.columns.duplicated()])
+        logger.warning("Duplicate column names %s found; keeping first occurrence", dupes)
+        df = df.loc[:, ~df.columns.duplicated()]
+    return df
 
 def custom_parse_date(s: str) -> pd.Timestamp:
     try:
