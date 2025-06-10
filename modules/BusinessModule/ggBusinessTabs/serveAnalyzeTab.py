@@ -55,8 +55,8 @@ def show(data: dict, filters: dict) -> None:
     if "orderdate1" in orders.columns:
         orders["orderdate1"] = pd.to_datetime(orders["orderdate1"], errors="coerce")
 
-    orders["accepted_seconds"] = orders.get("accepted_interval").apply(_parse_interval_seconds)
-    orders["arrived_minutes"] = orders.get("arrived_interval").apply(_parse_interval_seconds) / 60.0
+    orders["accepted_seconds"] = orders.get("acceptedinterval").apply(_parse_interval_seconds)
+    orders["arrived_minutes"] = orders.get("arrivedinterval").apply(_parse_interval_seconds) / 60.0
     orders["distance"] = pd.to_numeric(orders.get("distance"), errors="coerce")
     orders["fare"] = pd.to_numeric(orders.get("fare"), errors="coerce")
 

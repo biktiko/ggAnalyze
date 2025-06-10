@@ -14,7 +14,9 @@ GG_TEAMMATES_SHEETS    = {"gg teammates", "ggteammates"}
 ORDERS_COUNT_SHEETS    = {"orders count"}
 clients_SHEETS       = {"clients"}
 # New identifiers for serve orders and cancellations
-ORDERS_HISTORY_COLUMN = "accepted_interval"
+# Columns may come in various forms like "AcceptedInterval" or "accepted_interval".
+# Use the normalized name that ``standardize_columns`` would produce.
+ORDERS_HISTORY_COLUMN = "acceptedinterval"
 CANCELLATIONS_COLUMN  = "canceldate"
 # ──────────────────────────────────────────────────────────────────────────────
 # Логирование
@@ -117,6 +119,8 @@ def load_data_from_file(path: str) -> dict:
         for sheet in xls.sheet_names:
             sl = sheet.lower()
             df = pd.read_excel(xls, sheet_name=sheet)
+            # Drop any automatically generated "Unnamed" columns
+            df = df.loc[:, ~df.columns.str.lower().str.startswith("unnamed")]
             df = standardize_columns(df)
 
             # check for serve orders and cancellation sheets by column names
@@ -185,6 +189,7 @@ def load_data_from_file(path: str) -> dict:
     elif ext == "csv":
         # если нужен CSV
         df = pd.read_csv(path)
+        df = df.loc[:, ~df.columns.str.lower().str.startswith("unnamed")]
         df = standardize_columns(df)
         if "date" in df.columns:
             df["date"] = robust_parse_dates(df["date"], path)
