@@ -13,6 +13,9 @@ GG_PARTNERS_SHEETS     = {"partners details"}
 GG_TEAMMATES_SHEETS    = {"gg teammates", "ggteammates"}
 ORDERS_COUNT_SHEETS    = {"orders count"}
 clients_SHEETS       = {"clients"}
+# New identifiers for serve orders and cancellations
+ORDERS_HISTORY_COLUMN = "accepted_interval"
+CANCELLATIONS_COLUMN  = "canceldate"
 # ──────────────────────────────────────────────────────────────────────────────
 # Логирование
 # ──────────────────────────────────────────────────────────────────────────────
@@ -98,7 +101,10 @@ def load_data_from_file(path: str) -> dict:
         "ggtipsPartners": {k: pd.DataFrame() for k in GG_PARTNERS_SHEETS},
         "ggTeammates": pd.DataFrame(),
         "ordersCount": pd.DataFrame(),
-        'clients': pd.DataFrame()
+        "clients": pd.DataFrame(),
+        # new data types
+        "serveOrders": pd.DataFrame(),
+        "cancellations": pd.DataFrame(),
     }
 
     if not os.path.exists(path):
@@ -112,6 +118,27 @@ def load_data_from_file(path: str) -> dict:
             sl = sheet.lower()
             df = pd.read_excel(xls, sheet_name=sheet)
             df = standardize_columns(df)
+
+            # check for serve orders and cancellation sheets by column names
+            cols = set(df.columns.str.lower())
+            if ORDERS_HISTORY_COLUMN in cols:
+                if "orderdate1" in df.columns:
+                    df["orderdate1"] = pd.to_datetime(
+                        df["orderdate1"], format="%d/%m/%Y/%H:%M", errors="coerce"
+                    )
+                result["serveOrders"] = df
+                continue
+            if CANCELLATIONS_COLUMN in cols:
+                if "createdat" in df.columns:
+                    df["createdat"] = pd.to_datetime(
+                        df["createdat"], format="%d.%m.%Y %H:%M", errors="coerce"
+                    )
+                if "canceldate" in df.columns:
+                    df["canceldate"] = pd.to_datetime(
+                        df["canceldate"], format="%d.%m.%Y %H:%M", errors="coerce"
+                    )
+                result["cancellations"] = df
+                continue
 
             # — ggtips sheets —
             if sl in GG_TIPS_SHEETS:
@@ -271,11 +298,29 @@ def get_combined_data(session_data) -> dict:
             clients = df
             break
 
+    # 7) serve orders
+    serve_orders = pd.DataFrame()
+    for d in items:
+        df = d.get("serveOrders", pd.DataFrame())
+        if not df.empty:
+            serve_orders = df
+            break
+
+    # 8) cancellations
+    cancellations = pd.DataFrame()
+    for d in items:
+        df = d.get("cancellations", pd.DataFrame())
+        if not df.empty:
+            cancellations = df
+            break
+
     return {
         "ggtips": combined_tips,
         "ggtipsCompanies": companies,
         "ggtipsPartners": partners,
         "ggTeammates": teammates,
         "ordersCount": combined_orders,
-        "clients": clients
+        "clients": clients,
+        "serveOrders": serve_orders,
+        "cancellations": cancellations,
     }
