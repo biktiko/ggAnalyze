@@ -88,8 +88,7 @@ def show(data: dict, filters: dict) -> None:
 
 
     if not cancels.empty:
-        st.write('cancels')
-        st.write(cancels)
+ 
         cancels = cancels[cancels["mobile"].isin(orders["usermobile"])]
 
         date_col = "date" if "date" in cancels.columns else "createdAt"
