@@ -40,22 +40,22 @@ def _calc_stats(series: pd.Series) -> dict:
     series = pd.to_numeric(series, errors="coerce").dropna()
     if series.empty:
         return {
+            "Sum": None,
             "Average": None,
             "Median": None,
             "Skew": None,
             "stDeviation": None,
             "Min": None,
             "Max": None,
-            "Sum": None,
         }
     return {
+        "Sum": series.sum().__round__(0),
         "Average": series.mean().__round__(1),
         "Median": series.median().__round__(1),
         "Skew": series.skew() if len(series) > 2 else 0,
         "stDeviation": series.std(),
         "Min": series.min().__round__(0),
         "Max": series.max().__round__(0),
-        "Sum": series.sum().__round__(0),
     }
 
 
@@ -124,9 +124,13 @@ def show(data: dict, filters: dict) -> None:
         business_options = sorted(
             orders.get("businessusername", pd.Series(dtype=str)).dropna().astype(str).unique()
         )
-        selected_business = st.multiselect("Business usernames", business_options)
+        profiles_options = sorted(
+            orders.get("profilename", pd.Series(dtype=str)).dropna().astype(str).unique()
+        )
+
         col1, col2 = st.columns(2)
         with col1:
+            selected_profiles = st.multiselect("profiles", profiles_options)
             min_distance = st.number_input(
                 "Min distance",
                 value=float(
@@ -142,6 +146,7 @@ def show(data: dict, filters: dict) -> None:
                 ),
             )
         with col2:
+            selected_business = st.multiselect("Business usernames", business_options)
             max_distance = st.number_input(
                 "Max distance",
                 value=float(
@@ -166,6 +171,8 @@ def show(data: dict, filters: dict) -> None:
 
     if selected_business:
         orders = orders[orders["businessusername"].astype(str).isin(selected_business)]
+    if selected_profiles:
+        orders = orders[orders["profilename"].astype(str).isin(selected_profiles)]
 
     if selected_tariffs:
         orders = orders[orders["tariff"].astype(str).isin(selected_tariffs)]
@@ -217,38 +224,34 @@ def show(data: dict, filters: dict) -> None:
     with col_b:
         st.metric("Total cancels", cancel_count)
     with col_c:
-        st.metric("Unique mobiles with orders", unique_mobiles)
+        st.metric("Unique users with orders", unique_mobiles)
 
-    if "businessusername" in orders.columns:
-        tab_bus, tab_prof = st.tabs(["businessusername", "profilename"])
-        df_bus = (
-            orders.groupby("businessusername", as_index=False)
-            .size()
-            .rename(columns={"size": "order_count"})
-            .sort_values("order_count", ascending=False)
-        )
-        df_prof = (
-            orders.groupby("profilename", as_index=False)
-            .size()
-            .rename(columns={"size": "order_count"})
-            .sort_values("order_count", ascending=False)
-        )
-        with tab_bus:
-            st.bar_chart(df_bus.set_index("businessusername"))
-            st.dataframe(df_bus)
-        with tab_prof:
-            st.bar_chart(df_prof.set_index("profilename"))
-            st.dataframe(df_prof)
+    with st.expander("Detailed Metrics", expanded=False):
+        if "businessusername" in orders.columns:
+            tab_bus, tab_prof = st.tabs(["businessusername", "profilename"])
+            df_bus = (
+                orders.groupby("businessusername", as_index=False)
+                .size()
+                .rename(columns={"size": "order_count"})
+                .sort_values("order_count", ascending=False)
+            )
+            usermobiles = orders.groupby("businessusername")["usermobile"].first().reset_index()
+            df_bus = df_bus.merge(usermobiles, on="businessusername", how="left")
+            df_bus = df_bus[["businessusername", "usermobile", "order_count"]]
 
-    user_orders = (
-        orders.groupby("usermobile", as_index=False)
-        .size()
-        .rename(columns={"size": "order_count"})
-        .sort_values("order_count", ascending=False)
-    )
-    st.markdown("### Orders per usermobile")
-    st.dataframe(user_orders)
-
+            df_prof = (
+                orders.groupby("profilename", as_index=False)
+                .size()
+                .rename(columns={"size": "order_count"})
+                .sort_values("order_count", ascending=False)
+            )
+            with tab_bus:
+                st.bar_chart(df_bus.set_index("businessusername")["order_count"])
+                st.dataframe(df_bus)
+            with tab_prof:
+                st.bar_chart(df_prof.set_index("profilename"))
+                st.dataframe(df_prof)
+   
     # ----------- Charts -----------
     st.markdown("### Accepted Seconds Distribution")
     acc_chart = (
