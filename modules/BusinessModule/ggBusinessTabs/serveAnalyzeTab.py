@@ -178,29 +178,23 @@ def show(data: dict, filters: dict) -> None:
         "Fare (dram)": _calc_stats(orders["fare"]),
     }
 
-    # Stats including cancels (add waiting time)
-    if not cancels.empty:
-        merged = orders.merge(cancels[["userid", "wait_sec"]], on="userid", how="left")
-        merged["accepted_with_cancel"] = merged["accepted_seconds"] + merged[
-            "wait_sec"
-        ].fillna(0)
-    else:
-        merged = orders.copy()
-        merged["accepted_with_cancel"] = merged["accepted_seconds"]
+    # Stats including cancels
+    combined = pd.concat(
+        [
+            pd.to_numeric(orders.get("accepted_seconds"), errors="coerce"),
+            pd.to_numeric(cancels.get("wait_sec"), errors="coerce"),
+        ],
+        ignore_index=True,
+    )
 
-    stats_incl = _calc_stats(merged["accepted_with_cancel"])
+    stats_incl = _calc_stats(combined)
 
     # Prepare results for display
     metrics_df = pd.DataFrame(stats_excl).T
-    metrics_df_incl = pd.DataFrame([stats_incl]).T
-    metrics_df_incl.columns = ["Including cancels"]
+    metrics_df.loc["Accepted time including cancels"] = stats_incl
 
-    if not cancels.empty:
-        st.markdown("### Metrics without cancels")
-        st.dataframe(metrics_df)
-
-    st.markdown("### Accepted time including cancels")
-    st.dataframe(metrics_df_incl)
+    st.markdown("### Metrics")
+    st.dataframe(metrics_df)
 
     # ----------- Charts -----------
     st.markdown("### Accepted Seconds Distribution")
@@ -258,10 +252,13 @@ def show(data: dict, filters: dict) -> None:
         st.markdown("### Cancellation Wait Distribution")
         wait_chart = (
             alt.Chart(cancels)
+            .transform_bin("wait_bin", field="wait_sec", bin=alt.Bin(step=30))
+            .transform_aggregate(count="count()", groupby=["wait_bin"])
+            .transform_filter("datum.count > 0")
             .mark_bar()
             .encode(
-                alt.X("wait_sec:Q", bin=alt.Bin(step=30), title="Wait seconds"),
-                y="count()",
+                alt.X("wait_bin:O", title="Wait seconds"),
+                y="count:Q",
             )
         )
         st.altair_chart(wait_chart, use_container_width=True)
