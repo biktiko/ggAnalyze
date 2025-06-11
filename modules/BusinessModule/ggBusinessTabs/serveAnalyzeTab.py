@@ -86,10 +86,11 @@ def show(data: dict, filters: dict) -> None:
     orders["distance"] = pd.to_numeric(orders.get("distance"), errors="coerce")
     orders["fare"] = pd.to_numeric(orders.get("fare"), errors="coerce")
 
-    if "phonenumber" in orders.columns:
-        cancels = cancels[cancels["usermobile"].isin(orders["usermobile"])]
 
     if not cancels.empty:
+        st.write('cancels')
+        st.write(cancels)
+        cancels = cancels[cancels["mobile"].isin(orders["usermobile"])]
 
         date_col = "date" if "date" in cancels.columns else "createdAt"
         cancel_col = "canceldate" if "canceldate" in cancels.columns else "cancelDate"

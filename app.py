@@ -1,8 +1,8 @@
 # C:\Users\user\OneDrive\Desktop\Workspace\ggAnalyze\app.py
 import streamlit as st
+from auth import login
 st.set_page_config(layout='wide')
 
-from auth import login
 from modules import data_import, advanced
 from modules.ggTipsModule import ggTips
 from modules.BusinessModule import ggBusiness
