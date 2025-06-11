@@ -46,6 +46,7 @@ def _calc_stats(series: pd.Series) -> dict:
             "stDeviation": None,
             "Min": None,
             "Max": None,
+            "Sum": None,
         }
     return {
         "Average": series.mean().__round__(1),
@@ -54,6 +55,7 @@ def _calc_stats(series: pd.Series) -> dict:
         "stDeviation": series.std(),
         "Min": series.min().__round__(0),
         "Max": series.max().__round__(0),
+        "Sum": series.sum().__round__(0),
     }
 
 
@@ -119,6 +121,10 @@ def show(data: dict, filters: dict) -> None:
             orders.get("tariff", pd.Series(dtype=str)).dropna().astype(str).unique()
         )
         selected_tariffs = st.multiselect("Tariffs", tariff_options)
+        business_options = sorted(
+            orders.get("businessusername", pd.Series(dtype=str)).dropna().astype(str).unique()
+        )
+        selected_business = st.multiselect("Business usernames", business_options)
         col1, col2 = st.columns(2)
         with col1:
             min_distance = st.number_input(
@@ -158,6 +164,9 @@ def show(data: dict, filters: dict) -> None:
         start, end = pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1])
         orders = orders[(orders["orderdate1"] >= start) & (orders["orderdate1"] <= end)]
 
+    if selected_business:
+        orders = orders[orders["businessusername"].astype(str).isin(selected_business)]
+
     if selected_tariffs:
         orders = orders[orders["tariff"].astype(str).isin(selected_tariffs)]
 
@@ -168,6 +177,9 @@ def show(data: dict, filters: dict) -> None:
 
     if min_cancel_wait > 0:
         cancels = cancels[cancels["wait_sec"] >= min_cancel_wait]
+
+    # sync cancels with filtered orders
+    cancels = cancels[cancels["mobile"].isin(orders["usermobile"])]
 
     # Stats excluding cancels
     stats_excl = {
@@ -194,6 +206,48 @@ def show(data: dict, filters: dict) -> None:
 
     st.markdown("### Metrics")
     st.dataframe(metrics_df)
+
+    # additional overall metrics
+    order_count = len(orders)
+    cancel_count = len(cancels)
+    unique_mobiles = orders["usermobile"].nunique()
+    col_a, col_b, col_c = st.columns(3)
+    with col_a:
+        st.metric("Total rides", order_count)
+    with col_b:
+        st.metric("Total cancels", cancel_count)
+    with col_c:
+        st.metric("Unique mobiles with orders", unique_mobiles)
+
+    if "businessusername" in orders.columns:
+        tab_bus, tab_prof = st.tabs(["businessusername", "profilename"])
+        df_bus = (
+            orders.groupby("businessusername", as_index=False)
+            .size()
+            .rename(columns={"size": "order_count"})
+            .sort_values("order_count", ascending=False)
+        )
+        df_prof = (
+            orders.groupby("profilename", as_index=False)
+            .size()
+            .rename(columns={"size": "order_count"})
+            .sort_values("order_count", ascending=False)
+        )
+        with tab_bus:
+            st.bar_chart(df_bus.set_index("businessusername"))
+            st.dataframe(df_bus)
+        with tab_prof:
+            st.bar_chart(df_prof.set_index("profilename"))
+            st.dataframe(df_prof)
+
+    user_orders = (
+        orders.groupby("usermobile", as_index=False)
+        .size()
+        .rename(columns={"size": "order_count"})
+        .sort_values("order_count", ascending=False)
+    )
+    st.markdown("### Orders per usermobile")
+    st.dataframe(user_orders)
 
     # ----------- Charts -----------
     st.markdown("### Accepted Seconds Distribution")
