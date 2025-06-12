@@ -455,7 +455,6 @@ def show_ggtips_sidebar_filters(data: dict):
 
         # … дальше идёт код отрисовки навигации …
 
-
         # 8) Фильтры по партнёрам        
         # Унифицируем название компании в партнёрах (аналогично транзакциям)
         if not partners.empty and 'company' in partners.columns:
@@ -544,9 +543,13 @@ def show_ggtips_sidebar_filters(data: dict):
             selected_msg = st.multiselect("Partner Message", msg_options, key="partnerMsgFilter")
         
         # Применяем фильтры для partners
-        partners['partner'] = partners['partner'].astype(str).str.lower().str.strip()
-        if selected_partner:
-            partners = partners[partners['partner'].isin([p.lower() for p in selected_partner])]
+        if 'partner' in partners.columns:
+            partners['partner'] = partners['partner'].astype(str).str.lower().str.strip()
+            if selected_partner:
+                partners = partners[partners['partner'].isin([p.lower() for p in selected_partner])]
+            if 'partner' in mergedTips.columns and selected_partner:
+                mergedTips['partner'] = mergedTips['partner'].astype(str).str.lower().str.strip()
+                mergedTips = mergedTips[mergedTips['partner'].isin(partners['partner'].str.lower())]
         if selected_avatar:
             partners = partners[partners['avatar'].isin(selected_avatar)]
         if selected_msg:
@@ -557,10 +560,6 @@ def show_ggtips_sidebar_filters(data: dict):
                                                 (partners['date'] <= pd.to_datetime(pd_to))]
         if selected_account:
             partners = partners[partners['account_status'].isin(selected_account)]
-
-        if 'partner' in mergedTips.columns and selected_partner:
-            mergedTips['partner'] = mergedTips['partner'].astype(str).str.lower().str.strip()
-            mergedTips = mergedTips[mergedTips['partner'].isin(partners['partner'].str.lower())]
     
     # Создаём сгруппированный DataFrame, если выбран интервал группировки
     mergedTips = mergedTips.drop_duplicates(subset=['uuid'])
