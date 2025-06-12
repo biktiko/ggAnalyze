@@ -132,6 +132,12 @@ def show_ggtips_sidebar_filters(data: dict):
             'ggtipsPartners': partners
         }
     
+    if 'partner' not in partners.columns:
+        if 'name' in partners.columns:
+            partners = partners.rename(columns={'name': 'partner'})
+        else:
+            partners['partner'] = None
+    
     # 2. Подготавливаем данные компаний: добавляем company_unified и street_name
     if not companies.empty:
         if 'company' in companies.columns:
