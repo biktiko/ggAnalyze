@@ -165,7 +165,7 @@ def show_ggtips_sidebar_filters(data: dict):
             .drop(columns=["company_x", "company_y", "company_unified"], errors="ignore")
         )
 
-    if not companies.empty and "company" in companies.columns:
+    if not companies.empty and "company" in companies.columns and "company" in filteredTips.columns:
         companies_for_join = companies.set_index("company")
         
         filteredTips = filteredTips.drop_duplicates(subset="uuid")  # не забудь сохранить результат!
@@ -330,16 +330,19 @@ def show_ggtips_sidebar_filters(data: dict):
 
         # 1) Метрики по компаниям
         mergedTips = mergedTips.drop_duplicates(subset=['uuid'])
-        metrics = (
-            mergedTips
-            .groupby("company", observed=True)
-            .agg(
-                Amount = ("amount", "sum"),
-                Count  = ("uuid",   "count"),
-                LastTx = ("date",   "max"),
+        if 'company' in mergedTips.columns:
+            metrics = (
+                mergedTips
+                .groupby("company", observed=True)
+                .agg(
+                    Amount = ("amount", "sum"),
+                    Count  = ("uuid",   "count"),
+                    LastTx = ("date",   "max"),
+                )
+                .reset_index()
             )
-            .reset_index()
-        )
+        else:
+            metrics = pd.DataFrame(columns=["company", "Amount", "Count", "LastTx"])
 
         # 2) Метрики по партнёрам
         if "partner" in mergedTips.columns:
@@ -437,12 +440,14 @@ def show_ggtips_sidebar_filters(data: dict):
                 valid_partners = []
         else:
             # оставляем всё без фильтрации
-            valid_companies = metrics["company"].tolist()
-            valid_partners  = metricsPartners["partner"].tolist() if not metricsPartners.empty else []
+            valid_companies = metrics["company"].tolist() if "company" in metrics.columns else []
+            valid_partners  = metricsPartners["partner"].tolist() if not metricsPartners.empty and "partner" in metricsPartners.columns else []
 
         # 7) Применяем фильтр
-        mergedTips = mergedTips[mergedTips["company"].isin(valid_companies)]
-        companies  = companies[companies["company"].isin(valid_companies)]
+        if 'company' in mergedTips.columns:
+            mergedTips = mergedTips[mergedTips["company"].isin(valid_companies)]
+        if 'company' in companies.columns:
+            companies  = companies[companies["company"].isin(valid_companies)]
 
         partners = data.get('ggtipsPartners', pd.DataFrame()).copy()
         if valid_partners and "partner" in partners.columns:
