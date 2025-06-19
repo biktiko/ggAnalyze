@@ -193,7 +193,7 @@ def load_data_from_file(path: str) -> dict:
                 continue
 
             # — carseat orders —
-            if CARSEAT_SHEETS.issubset(cols):
+            if sl in CARSEAT_SHEETS:
                 df = df.drop(columns=[c for c in ["options", "count"] if c in df.columns])
                 if "statusid" in df.columns:
                     df["statusid"] = df["statusid"].replace({4: 5})
@@ -228,7 +228,7 @@ def load_data_from_file(path: str) -> dict:
         df = standardize_columns(df)
        
         cols = set(df.columns.str.lower())
-        if CARSEAT_SHEETS.issubset(cols):
+        if os.path.basename(path).lower().startswith('carseat') or CARSEAT_SHEETS.issubset(cols):
             df = df.drop(columns=[c for c in ["options", "count"] if c in df.columns])
             if "statusid" in df.columns:
                 df["statusid"] = df["statusid"].replace({4: 5})
