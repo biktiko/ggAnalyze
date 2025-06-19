@@ -13,6 +13,7 @@ GG_PARTNERS_SHEETS     = {"partners details"}
 GG_TEAMMATES_SHEETS    = {"gg teammates", "ggteammates"}
 ORDERS_COUNT_SHEETS    = {"orders count"}
 clients_SHEETS       = {"clients"}
+CARSEAT_SHEETS       = {"carseat"}
 # New identifiers for serve orders and cancellations
 # Columns may come in various forms like "AcceptedInterval" or "accepted_interval".
 # Use the normalized name that ``standardize_columns`` would produce.
@@ -112,6 +113,7 @@ def load_data_from_file(path: str) -> dict:
         # new data types
         "serveOrders": pd.DataFrame(),
         "cancellations": pd.DataFrame(),
+        "carseat": pd.DataFrame(),
     }
 
     if not os.path.exists(path):
@@ -190,6 +192,16 @@ def load_data_from_file(path: str) -> dict:
                 result["ggtipsPartners"][sl] = df
                 continue
 
+            # — carseat orders —
+            if CARSEAT_SHEETS.issubset(cols):
+                df = df.drop(columns=[c for c in ["options", "count"] if c in df.columns])
+                if "statusid" in df.columns:
+                    df["statusid"] = df["statusid"].replace({4: 5})
+                if "createdat" in df.columns:
+                    df["createdat"] = pd.to_datetime(df["createdat"], errors="coerce", dayfirst=True)
+                result["carseat"] = df
+                continue
+
             # — gg teammates —
             if sl in GG_TEAMMATES_SHEETS:
                 result["ggTeammates"] = df
@@ -214,10 +226,19 @@ def load_data_from_file(path: str) -> dict:
         df = pd.read_csv(path)
         df = df.loc[:, ~df.columns.str.lower().str.startswith("unnamed")]
         df = standardize_columns(df)
-        if "date" in df.columns:
-            df["date"] = robust_parse_dates(df["date"], path)
-        # принимаем что это tips
-        result["ggtips"] = {"csv": df}
+       
+        cols = set(df.columns.str.lower())
+        if CARSEAT_SHEETS.issubset(cols):
+            df = df.drop(columns=[c for c in ["options", "count"] if c in df.columns])
+            if "statusid" in df.columns:
+                df["statusid"] = df["statusid"].replace({4: 5})
+            if "createdat" in df.columns:
+                df["createdat"] = pd.to_datetime(df["createdat"], errors="coerce", dayfirst=True)
+            result["carseat"] = df
+        else:
+            if "date" in df.columns:
+                df["date"] = robust_parse_dates(df["date"], path)
+            result["ggtips"] = {"csv": df}
 
     else:
         logger.error("Unsupported extension: must be .xlsx or .csv")
@@ -342,6 +363,15 @@ def get_combined_data(session_data) -> dict:
         if not df.empty:
             cancellations = df
             break
+
+    # 9) carseat orders
+    carseat_frames = []
+    for d in items:
+        df = d.get("carseat", pd.DataFrame())
+        if not df.empty:
+            carseat_frames.append(df)
+
+    combined_carseat = pd.concat(carseat_frames, ignore_index=True) if carseat_frames else pd.DataFrame()
     
     return {
         "ggtips": combined_tips,
@@ -352,4 +382,5 @@ def get_combined_data(session_data) -> dict:
         "clients": clients,
         "serveOrders": serve_orders,
         "cancellations": cancellations,
+        "carseat": combined_carseat
     }
