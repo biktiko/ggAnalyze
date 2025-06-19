@@ -3,58 +3,60 @@ import pandas as pd
 from data_loader import merge_ggtips
 
 def get_combined_tips_data(session_clever_data: dict) -> dict:
-
-    # Initialize lists to collect DataFrames
-    combined_data = {
+    """
+    Из session_clever_data (словарь file_key -> datasets) собирает:
+      - все объединённые tips (merge_ggtips + partnersArchive)
+      - все ggtipsCompanies['companies']
+      - все ggtipsPartners['partners details']
+      - все ggTeammates
+      - один объединённый defaultInputs (словарь)
+    Возвращает dict с DataFrame-ами и defaultInputs.
+    """
+    # подготовим контейнеры
+    combined = {
         'ggtips': [],
         'ggtipsCompanies': [],
         'ggtipsPartners': [],
         'ggTeammates': []
     }
-    
+    default_inputs = {}
+
     for file_data in session_clever_data.values():
-        merged_tips = merge_ggtips(file_data['ggtips'])
-        # вот он — ваш архив из load_data
-        
+        # ——— 1. TIPSES ———
+        tips_raw = file_data.get('ggtips', {})          # самый внешний dict
+        merged_tips = merge_ggtips(tips_raw)            # ваша внутренняя логика по superadmin/ggpayers/alltips
+
+        # если есть partnersArchive — делаем merge
         archive = file_data.get('partnersArchive', pd.DataFrame())
+        if not archive.empty and not merged_tips.empty:
+            merged_tips = merged_tips.merge(archive, on='email', how='left')
 
-        if not archive.empty:
-            merged_tips = (
-                merged_tips
-                .merge(
-                   archive,
-                   on='email', how='left'
-                )
-            )
         if not merged_tips.empty:
-            combined_data['ggtips'].append(merged_tips)
-   
+            combined['ggtips'].append(merged_tips)
+
+        # ——— 2. COMPANIES ———
+        comp = file_data.get('ggtipsCompanies', {}).get('companies', pd.DataFrame())
+        if not comp.empty:
+            combined['ggtipsCompanies'].append(comp)
+
+        # ——— 3. PARTNERS ———
+        part = file_data.get('ggtipsPartners', {}).get('partners details', pd.DataFrame())
+        if not part.empty:
+            combined['ggtipsPartners'].append(part)
+
+        # ——— 4. TEAMMATES ———
+        team = file_data.get('ggTeammates', pd.DataFrame())
+        if not team.empty:
+            combined['ggTeammates'].append(team)
+
+        # ——— 5. DEFAULT INPUTS ———
+        default_inputs.update(file_data.get('defaultInputs', {}))
+
+    # собираем финальный результат
     result = {}
-    if combined_data['ggtips']:
-        result['ggtips'] = pd.concat(combined_data['ggtips'], ignore_index=True)
-    else:
-        result['ggtips'] = pd.DataFrame()
-    
-    companies_list = []
-    partners_list = []
-    teammates_list = []
-
-    for file_data in session_clever_data.values():
-        companies = file_data.get('ggtipsCompanies', {}).get('companies')
-        if companies is not None and not companies.empty:
-            companies_list.append(companies)
-
-        partners = file_data.get('ggtipsPartners', {}).get('partners details')
-        if partners is not None and not partners.empty:
-            partners_list.append(partners)
-
-        teammates = file_data.get('ggTeammates')
-        if teammates is not None and not teammates.empty:
-            teammates_list.append(teammates)
-
-    result['ggtipsCompanies'] = pd.concat(companies_list, ignore_index=True) if companies_list else pd.DataFrame()
-    result['ggtipsPartners'] = pd.concat(partners_list, ignore_index=True) if partners_list else pd.DataFrame()
-    result['ggTeammates'] = pd.concat(teammates_list, ignore_index=True) if teammates_list else pd.DataFrame()
+    for key, dfs in combined.items():
+        result[key] = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
+    result['defaultInputs'] = default_inputs
 
     return result
 

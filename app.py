@@ -8,6 +8,7 @@ from modules.ggTipsModule import ggTips
 from modules.BusinessModule import ggBusiness
 from modules.ggModule import gg
 from modules.ggTipsModule import ggTips_navigation
+from modules.CarseatModule import carseat
 
 
 # Проверка аутентификации
@@ -21,7 +22,7 @@ if "data" not in st.session_state:
 # Сайдбар и основной контент (отображаются только после логина)
 
 with st.sidebar:
-    page = st.radio("Select a page", ( "Data Import", "gg", "ggTips", "ggBusiness", "Developer mode"))
+    page = st.radio("Select a page", ( "Data Import", "gg", "ggTips", "ggBusiness", "Carseat", "Developer mode"))
     # Фильтры ggTips будем показывать, только если выбрана соответствующая страница
     
     if page == "ggTips":
@@ -34,14 +35,21 @@ with st.sidebar:
             ggBusinessData =st.session_state.clever_data
         else:
             ggBusinessData = None
+    elif page == "Carseat":
+        if "data" in st.session_state and st.session_state.clever_data:
+            CarseatData = st.session_state.clever_data
+        else:
+            CarseatData = None
             
 if page == "Data Import":
     data_import.show()
+elif page == "gg":
+    gg.show()
 elif page == "ggTips":
     ggTips.show(filteredTips)
 elif page == "ggBusiness":
     ggBusiness.show(ggBusinessData)
-elif page == "gg":
-    gg.show()
+elif page == "Carseat":
+    carseat.show(CarseatData) 
 elif page == "Developer mode":
     advanced.show()

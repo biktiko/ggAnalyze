@@ -115,6 +115,7 @@ def show_ggtips_sidebar_filters(data: dict):
     """
     # 1. Получаем объединённые данные из модуля ggTips_data
     data = ggTips_data.get_combined_tips_data(data)
+
     tips = data.get('ggtips', pd.DataFrame())
     companies = data.get('ggtipsCompanies', pd.DataFrame())
     partners = data.get('ggtipsPartners', pd.DataFrame())
