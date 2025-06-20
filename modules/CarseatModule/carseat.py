@@ -93,6 +93,13 @@ def show(session_clever_data: dict):
                   (df["status"].isin(selected_status))]
 
     filteredWithoutStatus = df[(df["date"].dt.date >= start) & (df["date"].dt.date <= end)]
+    
+    # Chart and tables under filters
+    agg = _aggregate(filtered, period)
+    aggPercentege = _aggregate(filteredWithoutStatus, period)
+    # percentage = agg.copy()
+    # percentage['percentage'] = percentage['Completed'] / (percentage['Completed'] + percentage['Cancelled']) * 100
+
     # Show statistics under filters
     col1, col2 = st.columns(2)
 
@@ -106,10 +113,19 @@ def show(session_clever_data: dict):
     with col2:
         st.metric("Cancelled", cancelled)
 
-    # Chart and tables under filters
-    agg = _aggregate(filtered, period)
-    _line_chart(agg, period, {"day":"День", "week":"Неделя", "month":"Месяц"}[period])
-    st.dataframe(agg, use_container_width=True)
+    ordersTab, percentageTab = st.tabs(["Orders", "Percentage"])
+    aggWithoutFilter = aggPercentege.copy()
+    aggWithoutFilter['Percent'] = aggWithoutFilter['Completed'] / (aggWithoutFilter['Completed'] + aggWithoutFilter['Cancelled']) * 100
+
+    with ordersTab:
+        _line_chart(agg, period, {"day":"Day", "week":"Week", "month":"Month"}[period])
+        if "Completed" in agg.columns and "Cancelled" in agg.columns:
+            agg['percentage'] = agg['Completed'] / (agg['Completed'] + agg['Cancelled']) * 100  
+    with percentageTab:
+        aggPercentege = aggWithoutFilter.drop(columns=["Completed", "Cancelled"], errors='ignore')
+        _line_chart(aggPercentege, period, {"day":"Day", "week":"Week", "month":"Month"}[period])
+
+    st.dataframe(aggWithoutFilter, use_container_width=True)
 
     # Orders by user
     st.subheader("Orders by User ")
