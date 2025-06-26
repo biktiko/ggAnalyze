@@ -219,6 +219,7 @@ def show(data: dict, filters: dict) -> None:
     # Function to create stats tab
     def stats_tab(df_orders, df_cancels, period_col, title_col):
         orders_stats = df_orders.groupby(period_col, as_index=False)["orders"].sum()
+        st.write(df_cancels)
         cancels_stats = (
             df_cancels.groupby(period_col, as_index=False)["userid"].nunique()
             if not df_cancels.empty else pd.DataFrame(columns=[period_col, "userid"])
