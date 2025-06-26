@@ -14,6 +14,8 @@ GG_TEAMMATES_SHEETS    = {"gg teammates", "ggteammates"}
 ORDERS_COUNT_SHEETS    = {"orders count"}
 clients_SHEETS       = {"clients"}
 CARSEAT_SHEETS       = {"carseat"}
+# New sheet identifier for mapping user ids to companies
+USERS_SHEETS        = {"users"}
 # New identifiers for serve orders and cancellations
 # Columns may come in various forms like "AcceptedInterval" or "accepted_interval".
 # Use the normalized name that ``standardize_columns`` would produce.
@@ -114,6 +116,7 @@ def load_data_from_file(path: str) -> dict:
         "serveOrders": pd.DataFrame(),
         "cancellations": pd.DataFrame(),
         "carseat": pd.DataFrame(),
+        "users": pd.DataFrame(),
     }
 
     if not os.path.exists(path):
@@ -221,6 +224,11 @@ def load_data_from_file(path: str) -> dict:
                 result["clients"] = df
                 continue
 
+            # — users mapping —
+            if sl in USERS_SHEETS:
+                result["users"] = df
+                continue
+
     elif ext == "csv":
         # если нужен CSV
         df = pd.read_csv(path)
@@ -235,6 +243,8 @@ def load_data_from_file(path: str) -> dict:
             if "createdat" in df.columns:
                 df["createdat"] = pd.to_datetime(df["createdat"], errors="coerce", dayfirst=True)
             result["carseat"] = df
+        elif USERS_SHEETS.intersection(cols):
+            result["users"] = df
         else:
             if "date" in df.columns:
                 df["date"] = robust_parse_dates(df["date"], path)
@@ -371,7 +381,15 @@ def get_combined_data(session_data) -> dict:
         if not df.empty:
             carseat_frames.append(df)
 
+    # 10) users mapping
+    users_frames = []
+    for d in items:
+        df = d.get("users", pd.DataFrame())
+        if not df.empty:
+            users_frames.append(df)
+
     combined_carseat = pd.concat(carseat_frames, ignore_index=True) if carseat_frames else pd.DataFrame()
+    combined_users = pd.concat(users_frames, ignore_index=True) if users_frames else pd.DataFrame()
     
     return {
         "ggtips": combined_tips,
@@ -382,5 +400,6 @@ def get_combined_data(session_data) -> dict:
         "clients": clients,
         "serveOrders": serve_orders,
         "cancellations": cancellations,
-        "carseat": combined_carseat
+        "carseat": combined_carseat,
+        "users": combined_users,
     }
