@@ -88,17 +88,38 @@ def show(data: dict, filters: dict) -> None:
     cancels_period = pd.DataFrame()
     created_col = "date" if "date" in cancels.columns else "createdat"
     if not cancels.empty:
+
         cancels_period = cancels[(cancels[created_col].dt.date >= start_date) & (cancels[created_col].dt.date <= end_date)]
         if not include_weekends:
             cancels_period = cancels_period[cancels_period[created_col].dt.weekday < 5]
+            # aggregate wait time per user and keep first cancel
+            # 1) добавляем чистую дату события
+        cancels_period["company"] = cancels_period["company"].fillna("not find company")
 
-        # aggregate wait time per user and keep first cancel
-        waits = cancels_period.groupby("userid", as_index=False)["wait_min"].sum()
-        first_rows = cancels_period.sort_values(created_col).drop_duplicates("userid", keep="first")
-        cancels_period = first_rows.drop(columns=["wait_min"]).merge(waits, on="userid", how="left")
+        cancels_period = cancels_period.assign(
+            cancel_date = cancels_period[created_col].dt.date
+        )
 
+        # 2) суммируем wait_min по company, userid и дате
+        waits = (
+            cancels_period
+            .groupby(["company", "userid", "cancel_date"], as_index=False)["wait_min"]
+            .sum()
+        )
 
+        # 3) оставляем первую запись в каждой группе (чтобы пронести остальные колонки)
+        first_rows = (
+            cancels_period
+            .sort_values(created_col)
+            .drop_duplicates(subset=["company", "userid", "cancel_date"], keep="first")
+        )
 
+        # 4) объединяем с суммами и переименовываем cancel_date → date
+        cancels_period = (
+            first_rows
+            .drop(columns=["wait_min"])
+            .merge(waits, on=["company", "userid", "cancel_date"], how="left")
+        )
     # основные метрики, включая userid
     metrics = (
         df_period.groupby("company", as_index=False)
@@ -204,7 +225,6 @@ def show(data: dict, filters: dict) -> None:
         if selected_tariffs and 'tariff' in cancels_period.columns:
             cancels_period = cancels_period[cancels_period['tariff'].astype(str).isin(selected_tariffs)]
         cancels_period = cancels_period[cancels_period['wait_min'] >= cancel_min_wait]
-
         cancels_daily = (
             cancels_period
             .assign(date=cancels_period[created_col].dt.date)
@@ -215,16 +235,13 @@ def show(data: dict, filters: dict) -> None:
     else:
         cancels_daily = pd.DataFrame()
     tabs = st.tabs(["По дням", "По неделям", "По месяцам"])
-
     # Function to create stats tab
     def stats_tab(df_orders, df_cancels, period_col, title_col):
         orders_stats = df_orders.groupby(period_col, as_index=False)["orders"].sum()
-        st.write(df_cancels)
         cancels_stats = (
-            df_cancels.groupby(period_col, as_index=False)["userid"].nunique()
-            if not df_cancels.empty else pd.DataFrame(columns=[period_col, "userid"])
+            df_cancels.groupby(period_col, as_index=False)["cancels"].sum()
+            if not df_cancels.empty else pd.DataFrame(columns=[period_col, "cancels"])
         )
-        cancels_stats = cancels_stats.rename(columns={"userid": "cancels"})
         stats = pd.merge(orders_stats, cancels_stats, on=period_col, how="outer").fillna(0)
         stats = stats.rename(columns={period_col: title_col})
 
@@ -256,7 +273,11 @@ def show(data: dict, filters: dict) -> None:
         week_df['week_start'] = pd.to_datetime(week_df['date']).dt.to_period('W').apply(lambda r: r.start_time.date())
         canc_week = cancels_daily.copy()
         if not canc_week.empty:
-            canc_week['week_start'] = pd.to_datetime(canc_week['date']).to_period('W').apply(lambda r: r.start_time.date())
+            canc_week['week_start'] = (
+                pd.to_datetime(canc_week['date'], errors='coerce')
+                .dt.to_period('W')
+                .apply(lambda r: r.start_time.date())
+            )
         stats_tab(week_df, canc_week, 'week_start', 'week start')
 
     # Monthly
@@ -266,7 +287,12 @@ def show(data: dict, filters: dict) -> None:
         month_df['month_start'] = pd.to_datetime(month_df['date']).dt.to_period('M').apply(lambda r: r.start_time.date())
         canc_month = cancels_daily.copy()
         if not canc_month.empty:
-            canc_month['month_start'] = pd.to_datetime(canc_month['date']).to_period('M').apply(lambda r: r.start_time.date())
+            canc_month['month_start'] = (
+                pd.to_datetime(canc_month['date'], errors='coerce')
+                .dt.to_period('M')
+                .apply(lambda r: r.start_time.date())
+            )
+
         stats_tab(month_df, canc_month, 'month_start', 'month start')
 
     
