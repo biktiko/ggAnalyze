@@ -295,6 +295,69 @@ def show(data: dict, filters: dict) -> None:
 
         stats_tab(month_df, canc_month, 'month_start', 'month start')
 
+
+    # считаем отмены именно за last_day по company
+    last_cancels = (
+        cancels_period[cancels_period["cancel_date"] == last_day]
+        .groupby("company")["userid"]
+        .count()
+    )
+
+    last_df = (
+        metrics.set_index("company")[["userid", "last orders"]]
+        .rename(columns={"last orders": "orders"})
+        .assign(
+            cancels=lambda d: d.index.to_series()
+                            .map(last_cancels)
+                            .fillna(0)
+                            .astype(int)
+        )
+        .reset_index()
+    )
+
+    # 2) Таблица суммарных заказов и отмен за период
+    total_cancels = (
+        cancels_period
+        .assign(date=cancels_period["canceldate"].dt.date)
+        .groupby("company")["userid"]
+        .count()
+    )
+
+    totals_df = (
+        metrics.set_index("company")[["userid", "sum_orders"]]
+        .rename(columns={"sum_orders": "total_orders"})
+        .assign(total_cancels=total_cancels)
+        .fillna({"total_cancels": 0})
+        .reset_index()
+    )
+
+
+
+    st.markdown("---")
+    st.markdown("#### Сводка по последнему дню и за всё время")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown(f"**Данные за последний день ({last_day.strftime('%d.%m.%Y')})**")
+        st.dataframe(last_df, use_container_width=True)
+        st.download_button(
+            "Скачать Last Day CSV",
+            last_df.to_csv(index=False).encode(),
+            f"last_day_{last_day}.csv",
+            "text/csv"
+        )
+
+    with col2:
+        st.markdown("**Итого за выбранный период**")
+        st.dataframe(totals_df, use_container_width=True)
+        st.download_button(
+            "Скачать Totals CSV",
+            totals_df.to_csv(index=False).encode(),
+            "totals_period.csv",
+            "text/csv"
+        )
+    st.write(f"Last day orders: {metrics['last orders'].sum()}")
+    # st.write(f"Last day cancels: {last_cancels.count()}")
     
     # Bottom trend chart and table
     st.markdown('---')
@@ -377,7 +440,12 @@ def show(data: dict, filters: dict) -> None:
         ].copy()
 
         # 2) вычисляем имя дня недели
-        df_range['weekday'] = pd.to_datetime(df_range['date']).dt.day_name(locale='en_US')
+        # df_range['weekday'] = pd.to_datetime(df_range['date']).dt.day_name(locale='en_US')
+        weekday_map = {
+            0: 'Monday', 1: 'Tuesday', 2: 'Wednesday', 3: 'Thursday',
+            4: 'Friday', 5: 'Saturday', 6: 'Sunday'
+        }
+        df_range['weekday'] = pd.to_datetime(df_range['date']).dt.weekday.map(weekday_map)
 
         # 3) суммируем заказы по (компания, день недели)
         weekday_stats = (
