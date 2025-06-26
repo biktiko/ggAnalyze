@@ -71,6 +71,7 @@ def get_combined_business_data(session_clever_data: dict) -> dict:
     clients_list  = []
     serve_orders_list = []
     cancellations_list = []
+    users_list = []
 
     for file_data in session_clever_data.values():
         # --- ordersCount ---
@@ -94,14 +95,21 @@ def get_combined_business_data(session_clever_data: dict) -> dict:
         if not can.empty:
             cancellations_list.append(can.copy())
 
+        # --- users mapping ---
+        u_df = file_data.get("users", pd.DataFrame())
+        if not u_df.empty:
+            users_list.append(u_df.copy())
+
     orders = pd.concat(orders_list, ignore_index=True) if orders_list else pd.DataFrame(columns=["date","userid","orders"])
     clients = pd.concat(clients_list, ignore_index=True) if orders_list else pd.DataFrame()
     serve_orders = pd.concat(serve_orders_list, ignore_index=True) if serve_orders_list else pd.DataFrame()
     cancellations = pd.concat(cancellations_list, ignore_index=True) if cancellations_list else pd.DataFrame()
+    users = pd.concat(users_list, ignore_index=True) if users_list else pd.DataFrame()
 
     return {
         "orders": orders,
         "clients": clients,
         "serveOrders": serve_orders,
         "cancellations": cancellations,
+        "users": users,
     }
