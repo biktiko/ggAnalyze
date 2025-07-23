@@ -3,42 +3,47 @@ import pandas as pd
 import altair as alt
 from datetime import datetime, timedelta
 import io
-from modules.BusinessModule.businessFilters import get_common_filters
 
-def show(data: dict, filters: dict) -> None:
+def show(data: dict,) -> None:
     """
     Tab "Orders" — daily analytics of company orders.
-    Принимает:
-      - data: {"orders": DataFrame, "clients": DataFrame}
-      - filters: результат get_common_filters()
+    Accepts:
+      - data: {"orders": DataFrame, "clients": DataFrame, "cancellations": DataFrame, "users": DataFrame}
     """
-    # распаковываем фильтры
-    min_avg          = filters["min_avg"]
-    last_days        = filters["last_days"]
-    date_range       = filters["date_range"]
-    download         = filters["download"]
-    include_weekends = filters["include_weekends"]
-    today            = filters["today"]
-    default_start    = filters["default_start"]
-
     st.subheader("Daily Orders per Company")
 
-    orders  = data.get("orders", pd.DataFrame()).copy()
+    # --- Filters (Moved from sidebar to main page) ---
+    with st.expander("Filters", expanded=True):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            min_avg = st.number_input('Min. avg orders per day', 0.0, None, 1.0, 0.1)
+            last_days = st.number_input('Companies joined in last N days', 0, None, 7)
+        with col2:
+            today = datetime.today().date()
+            default_start = today - timedelta(days=30)
+            date_range = st.date_input('Date range for table', value=(default_start, today))
+        with col3:
+            include_weekends = st.checkbox('Include weekends', value=True)
+            # This checkbox will control the visibility of the Excel download button later
+            download_excel_check = st.checkbox('Prepare Excel for download')
+
+    # --- Data Loading and Preparation ---
+    orders = data.get("orders", pd.DataFrame()).copy()
     clients = data.get("clients", pd.DataFrame()).copy()
     cancels = data.get("cancellations", pd.DataFrame()).copy()
     users_df = data.get("users", pd.DataFrame()).copy()
     if orders.empty or clients.empty:
-        st.info("Not enough data: please upload both 'orders' and 'clients'.")
+        st.info("Not enough data: please provide both 'orders' and 'clients' data.")
         return
 
-    # подготовка дат и типов
-    orders["date"]      = pd.to_datetime(orders["date"], errors="coerce").dt.date
-    clients["userid"]   = clients["userid"].astype(str)
-    clients["mobile"]   = clients["mobile"].astype(str)
+    # Prepare dates and types
+    orders["date"] = pd.to_datetime(orders["date"], errors="coerce").dt.date
+    clients["userid"] = clients["userid"].astype(str)
+    clients["mobile"] = clients["mobile"].astype(str)
     clients["companymanager"] = clients["companymanager"].astype(str)
-    clients["join_date"]= pd.to_datetime(clients.get("date"), errors="coerce").dt.date
+    clients["join_date"] = pd.to_datetime(clients.get("date"), errors="coerce").dt.date
 
-    # prepare cancels and map to companies
+    # Prepare cancels and map to companies
     if not cancels.empty and not users_df.empty:
         import ast
         def parse_list(val):
@@ -63,10 +68,10 @@ def show(data: dict, filters: dict) -> None:
         cancels["canceldate"] = pd.to_datetime(cancels["canceldate"], errors="coerce")
         cancels["wait_min"] = (cancels["canceldate"] - cancels[created_col]).dt.total_seconds() / 60.0
 
-    # объединяем данные
+    # Merge data
     df = (
         orders.merge(
-            clients[["userid","company","companymanager","join_date","mobile"]],
+            clients[["userid", "company", "companymanager", "join_date", "mobile"]],
             left_on=orders["userid"].astype(str),
             right_on="userid",
             how="left"
@@ -74,7 +79,7 @@ def show(data: dict, filters: dict) -> None:
         .dropna(subset=["company"])
     )
 
-    # разбираем дату-фильтры
+    # Parse date filters
     if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
         start_date, end_date = date_range
     else:
@@ -84,146 +89,125 @@ def show(data: dict, filters: dict) -> None:
     if not include_weekends:
         df_period = df_period[pd.to_datetime(df_period["date"]).dt.weekday < 5]
 
-    # filter cancels by date and weekends
+    # Filter cancels by date and weekends
     cancels_period = pd.DataFrame()
     created_col = "date" if "date" in cancels.columns else "createdat"
     if not cancels.empty:
-
         cancels_period = cancels[(cancels[created_col].dt.date >= start_date) & (cancels[created_col].dt.date <= end_date)]
         if not include_weekends:
             cancels_period = cancels_period[cancels_period[created_col].dt.weekday < 5]
-            # aggregate wait time per user and keep first cancel
-            # 1) добавляем чистую дату события
+        
         cancels_period["company"] = cancels_period["company"].fillna("not find company")
+        cancels_period = cancels_period.assign(cancel_date=cancels_period[created_col].dt.date)
+        
+        waits = cancels_period.groupby(["company", "userid", "cancel_date"], as_index=False)["wait_min"].sum()
+        first_rows = cancels_period.sort_values(created_col).drop_duplicates(subset=["company", "userid", "cancel_date"], keep="first")
+        cancels_period = first_rows.drop(columns=["wait_min"]).merge(waits, on=["company", "userid", "cancel_date"], how="left")
 
-        cancels_period = cancels_period.assign(
-            cancel_date = cancels_period[created_col].dt.date
-        )
-
-        # 2) суммируем wait_min по company, userid и дате
-        waits = (
-            cancels_period
-            .groupby(["company", "userid", "cancel_date"], as_index=False)["wait_min"]
-            .sum()
-        )
-
-        # 3) оставляем первую запись в каждой группе (чтобы пронести остальные колонки)
-        first_rows = (
-            cancels_period
-            .sort_values(created_col)
-            .drop_duplicates(subset=["company", "userid", "cancel_date"], keep="first")
-        )
-
-        # 4) объединяем с суммами и переименовываем cancel_date → date
-        cancels_period = (
-            first_rows
-            .drop(columns=["wait_min"])
-            .merge(waits, on=["company", "userid", "cancel_date"], how="left")
-        )
-    # основные метрики, включая userid
+    # Main metrics calculation
     metrics = (
         df_period.groupby("company", as_index=False)
         .agg(
-            userid      = ("userid",        "first"),
-            join_date   = ("join_date",     "min"),
-            manager     = ("companymanager","first"),
-            sum_orders  = ("orders",        "sum"),
-            days_active = ("date",          "nunique"),
+            userid=("userid", "first"),
+            join_date=("join_date", "min"),
+            manager=("companymanager", "first"),
+            sum_orders=("orders", "sum"),
+            days_active=("date", "nunique"),
         )
     )
     metrics["avg_orders"] = (metrics["sum_orders"] / metrics["days_active"]).round(2)
-    metrics["join_date"]  = pd.to_datetime(metrics["join_date"])
+    metrics["join_date"] = pd.to_datetime(metrics["join_date"])
 
-    # фильтр по avg и дате подключения
+    # Filter by avg and join date
     cutoff = today - timedelta(days=int(last_days))
-    mask   = (metrics["avg_orders"] >= min_avg) | (metrics["join_date"].dt.date >= cutoff)
+    mask = (metrics["avg_orders"] >= min_avg) | (metrics["join_date"].dt.date >= cutoff)
     selected = metrics.loc[mask, "company"].tolist() or metrics["company"].tolist()
 
-    # pivot-таблица с суммой заказов за каждый день
+    # Pivot table with daily order sums
     daily_sum = (
         df_period[df_period["company"].isin(selected)]
-        .groupby(["company","date"], observed=True)["orders"]
+        .groupby(["company", "date"], observed=True)["orders"]
         .sum()
         .reset_index()
     )
     pivot = daily_sum.pivot(index="company", columns="date", values="orders").fillna(0)
     pivot.columns = [d.strftime("%d.%m.%Y") for d in pivot.columns]
 
-    # последние заказы
+    # Last day's orders
     if not daily_sum.empty:
-        last_day    = daily_sum["date"].max()
+        last_day = daily_sum["date"].max()
         last_orders = daily_sum[daily_sum["date"] == last_day].set_index("company")["orders"]
     else:
+        last_day = end_date
         last_orders = pd.Series(dtype=int)
     metrics["last orders"] = metrics["company"].map(last_orders).fillna(0).astype(int)
 
-    # сборка итоговой таблицы
+    # Final result table assembly
     result = (
         metrics.set_index("company")
         .loc[selected]
         .join(pivot)
         .reset_index()
         .rename(columns={
-            "join_date":   "join date",
-            "sum_orders":  "sum",
-            "avg_orders":  "daily average"
+            "join_date": "join date",
+            "sum_orders": "sum",
+            "avg_orders": "daily average"
         })
     )
-
-    # перемещаем колонку userid в начало
     result.insert(0, "userid", result.pop("userid"))
 
-    # скачивание Excel
-    if download:
-        buf = io.BytesIO()
-        result.to_excel(buf, index=False, sheet_name="Orders")
-        buf.seek(0)
-        st.sidebar.download_button(
-            "Download Excel", buf,
-            "orders.xlsx",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-
-    # отображение с AgGrid (если доступно)
+    # --- Display Area ---
     st.markdown("#### Companies and Daily Orders")
+    
+    # Display AgGrid or default DataFrame
     try:
         from st_aggrid import AgGrid, GridOptionsBuilder
         gb = GridOptionsBuilder.from_dataframe(result)
         gb.configure_default_column(resizable=True, sortable=True, filter=True, min_column_width=80)
         gb.configure_column("userid", pinned="left", header_name="User ID", width=120)
         gb.configure_column("company", pinned="left", width=100)
-        gb.configure_column(
-            "join date",
-            pinned="left",
-            type=["dateColumnFilter","customDateTimeFormat"],
-            custom_format_string="dd.MM.yyyy"
-        )
+        gb.configure_column("join date", pinned="left", type=["dateColumnFilter", "customDateTimeFormat"], custom_format_string="dd.MM.yyyy")
         gb.configure_column("manager", header_name="Manager")
         grid_opts = gb.build()
         AgGrid(result, gridOptions=grid_opts, height=400, enable_enterprise_modules=True)
     except ImportError:
         st.dataframe(result, use_container_width=True, height=400)
 
-    st.download_button(
-        'Download Companies Pivot',
-        result.to_csv(index=False).encode(),
-        'companies_daily_orders.csv',
-        'text/csv'
-    )
+    # Download buttons
+    dl_col1, dl_col2 = st.columns(2)
+    with dl_col1:
+        st.download_button(
+            'Download Pivot as CSV',
+            result.to_csv(index=False).encode(),
+            'companies_daily_orders.csv',
+            'text/csv'
+        )
+    with dl_col2:
+        if download_excel_check:
+            buf = io.BytesIO()
+            result.to_excel(buf, index=False, sheet_name="Orders")
+            buf.seek(0)
+            st.download_button(
+                "Download Pivot as Excel", buf,
+                "orders.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 
-    # Aggregated stats in tabs
+    # --- Aggregated Statistics ---
     st.markdown('---')
     st.markdown('#### Aggregated Statistics')
 
-    cancel_min_wait = 0
-    selected_tariffs = []
+    # ... (rest of the script for aggregated stats and charts remains the same)
+    # This section is quite long and has its own filters, so it's kept as is.
+    
+    cancels_daily = pd.DataFrame()
     if not cancels_period.empty:
         st.markdown('**Pure Cancel Filters**')
         cancel_min_wait = st.number_input('Minimum wait (minutes)', min_value=0, value=1)
         tariff_opts = sorted(cancels_period.get('tariff', pd.Series(dtype=str)).dropna().astype(str).unique())
-        selected_tariffs = st.multiselect('Filter tariffs', tariff_opts, default=tariff_opts)
-        if selected_tariffs and 'tariff' in cancels_period.columns:
-            cancels_period = cancels_period[cancels_period['tariff'].astype(str).isin(selected_tariffs)]
+        selected_tariffs_cancel = st.multiselect('Filter tariffs', tariff_opts, default=tariff_opts)
+        if selected_tariffs_cancel and 'tariff' in cancels_period.columns:
+            cancels_period = cancels_period[cancels_period['tariff'].astype(str).isin(selected_tariffs_cancel)]
         cancels_period = cancels_period[cancels_period['wait_min'] >= cancel_min_wait]
         cancels_daily = (
             cancels_period
@@ -232,10 +216,9 @@ def show(data: dict, filters: dict) -> None:
             .nunique()
             .reset_index(name='cancels')
         )
-    else:
-        cancels_daily = pd.DataFrame()
-    tabs = st.tabs(["По дням", "По неделям", "По месяцам"])
-    # Function to create stats tab
+
+    tabs = st.tabs(["Daily", "Weekly", "Monthly"])
+    
     def stats_tab(df_orders, df_cancels, period_col, title_col):
         orders_stats = df_orders.groupby(period_col, as_index=False)["orders"].sum()
         cancels_stats = (
@@ -258,41 +241,24 @@ def show(data: dict, filters: dict) -> None:
             .properties(height=300)
         )
         st.altair_chart(chart, use_container_width=True)
-        st.download_button(f'Download {title_col} Stats', stats.to_csv(index=False).encode(), f'{title_col}_stats.csv', 'text/csv')
+        st.download_button(f'Download {title_col} Stats', stats.to_csv(index=False).encode(), f'{title_col}_stats.csv', 'text/csv', key=f'dl_{title_col}')
         st.dataframe(stats, use_container_width=True)
 
-    # Daily
     with tabs[0]:
-        st.subheader("Daily stats")
         stats_tab(daily_sum, cancels_daily, 'date', 'date')
-
-    # Weekly
     with tabs[1]:
-        st.subheader("Weekly stats")
         week_df = daily_sum.copy()
         week_df['week_start'] = pd.to_datetime(week_df['date']).dt.to_period('W').apply(lambda r: r.start_time.date())
         canc_week = cancels_daily.copy()
         if not canc_week.empty:
-            canc_week['week_start'] = (
-                pd.to_datetime(canc_week['date'], errors='coerce')
-                .dt.to_period('W')
-                .apply(lambda r: r.start_time.date())
-            )
+            canc_week['week_start'] = pd.to_datetime(canc_week['date'], errors='coerce').dt.to_period('W').apply(lambda r: r.start_time.date())
         stats_tab(week_df, canc_week, 'week_start', 'week start')
-
-    # Monthly
     with tabs[2]:
-        st.subheader("Monthly stats")
         month_df = daily_sum.copy()
         month_df['month_start'] = pd.to_datetime(month_df['date']).dt.to_period('M').apply(lambda r: r.start_time.date())
         canc_month = cancels_daily.copy()
         if not canc_month.empty:
-            canc_month['month_start'] = (
-                pd.to_datetime(canc_month['date'], errors='coerce')
-                .dt.to_period('M')
-                .apply(lambda r: r.start_time.date())
-            )
-
+            canc_month['month_start'] = pd.to_datetime(canc_month['date'], errors='coerce').dt.to_period('M').apply(lambda r: r.start_time.date())
         stats_tab(month_df, canc_month, 'month_start', 'month start')
 
 

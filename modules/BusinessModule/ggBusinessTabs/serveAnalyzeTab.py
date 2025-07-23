@@ -47,7 +47,7 @@ def _calc_stats(series: pd.Series) -> dict:
     }
 
 def _create_company_mapping(users_df: pd.DataFrame) -> dict:
-    """Создает словарь для сопоставления userid с компанией."""
+    """Creates a dictionary to map userid to a company."""
     if users_df.empty or 'users' not in users_df.columns:
         return {}
         
@@ -66,7 +66,7 @@ def _create_company_mapping(users_df: pd.DataFrame) -> dict:
     return mapping
 
 def _group_cancellations(cancels_df: pd.DataFrame) -> pd.DataFrame:
-    """Группирует отмены по пользователю и дню, суммируя время ожидания."""
+    """Groups cancellations by user and day, summing the wait time."""
     if cancels_df.empty or "canceldate" not in cancels_df.columns:
         return pd.DataFrame()
 
@@ -85,7 +85,7 @@ def _group_cancellations(cancels_df: pd.DataFrame) -> pd.DataFrame:
 
 # --- MAIN SHOW FUNCTION ---
 
-def show(data: dict, filters: dict) -> None:
+def show(data: dict) -> None:
     
     # --- Data Loading and Initial Preparation ---
     orders = data.get("serveOrders", pd.DataFrame()).copy()
@@ -177,7 +177,50 @@ def show(data: dict, filters: dict) -> None:
 
     grouped_cancels = _group_cancellations(cancels)
 
-    # --- Calculations & Metrics Display ---
+    # --- Service Quality Alert Panel ---
+    st.markdown("---")
+    st.markdown("### 🚨 Service Quality Alert Panel")
+    
+    alert_cols = st.columns(3)
+    with alert_cols[0]:
+        min_orders_alert = st.number_input("Min. number of orders", min_value=1, value=10, step=1)
+    with alert_cols[1]:
+        cancel_rate_alert = st.slider("Cancel Rate Threshold (%)", 0, 100, 15)
+    with alert_cols[2]:
+        slow_accept_rate_alert = st.slider("Slow Acceptance Threshold (%)", 0, 100, 30)
+
+    # Calculations for the alert panel
+    if not orders.empty:
+        q3_accept_time = orders["accepted_seconds"].quantile(0.75)
+        
+        total_orders_co = orders.groupby('company').size().reset_index(name='total_orders')
+        slow_accept_co = orders[orders["accepted_seconds"] > q3_accept_time].groupby('company').size().reset_index(name='slow_accept_count')
+        cancel_sessions_co = grouped_cancels.groupby('company').size().reset_index(name='cancel_session_count')
+
+        alert_df = pd.merge(total_orders_co, slow_accept_co, on='company', how='left')
+        alert_df = pd.merge(alert_df, cancel_sessions_co, on='company', how='left').fillna(0)
+
+        alert_df['cancel_rate'] = (alert_df['cancel_session_count'] / alert_df['total_orders'] * 100)
+        alert_df['slow_accept_rate'] = (alert_df['slow_accept_count'] / alert_df['total_orders'] * 100)
+
+        problem_companies = alert_df[
+            (alert_df['total_orders'] >= min_orders_alert) &
+            (alert_df['cancel_rate'] >= cancel_rate_alert) &
+            (alert_df['slow_accept_rate'] >= slow_accept_rate_alert)
+        ]
+
+        if not problem_companies.empty:
+            st.error(f"Found {len(problem_companies)} companies with potential service quality issues!")
+            st.dataframe(problem_companies.style.format({
+                'cancel_rate': '{:.1f}%',
+                'slow_accept_rate': '{:.1f}%'
+            }))
+        else:
+            st.success("No problem companies found based on the current criteria.")
+
+    # --- Key Metrics Display (RESTORED) ---
+    st.markdown("---")
+    st.markdown("### Key Metrics")
     stats_excl = {
         "Accepted time (sec)": _calc_stats(orders["accepted_seconds"]),
         "Arrived time (min)": _calc_stats(orders["arrived_minutes"]),
@@ -189,8 +232,7 @@ def show(data: dict, filters: dict) -> None:
     stats_incl = _calc_stats(combined)
     metrics_df = pd.DataFrame(stats_excl).T
     metrics_df.loc["Accepted time including cancels"] = stats_incl
-
-    st.markdown("### Key Metrics")
+    
     display_columns = ["Min", "Q1 (25%)", "Median (50%)", "Q3 (75%)", "Max", "IQR", "Average", "Sum", "stDeviation", "Skew"]
     st.dataframe(metrics_df[[col for col in display_columns if col in metrics_df.columns]])
     
@@ -198,14 +240,13 @@ def show(data: dict, filters: dict) -> None:
     with col_a: st.metric("Total rides", len(orders))
     with col_b: st.metric("Total Cancel Sessions", len(grouped_cancels))
     with col_c: st.metric("Unique users with orders", orders["userid"].nunique())
-
-    # --- Анализ самых медленных заказов с процентами и порогом ---
-    st.markdown("---")
-    st.markdown("### 🕵️ Анализ самых медленных 25% заказов")
-    q3_arrival_time = stats_excl.get("Arrived time (min)", {}).get("Q3 (75%)")
     
-    # НОВЫЙ ФИЛЬТР: Порог минимального количества заказов
-    min_total_orders = st.number_input("Minimum total orders for analysis", min_value=1, value=30, step=1, help="Включать в анализ только компании с количеством заказов выше этого порога.")
+    # --- Analysis of the Slowest 25% of Orders ---
+    st.markdown("---")
+    st.markdown("### 🕵️ Analysis of the Slowest 25% of Orders")
+    q3_arrival_time = orders['arrived_minutes'].quantile(0.75) if not orders.empty else None
+    
+    min_total_orders = st.number_input("Minimum total orders for analysis", min_value=1, value=5, step=1, help="Only include companies with an order count above this threshold.")
 
     if q3_arrival_time is not None and not orders.empty:
         slow_orders_df = orders[orders["arrived_minutes"] > q3_arrival_time].copy()
@@ -215,30 +256,29 @@ def show(data: dict, filters: dict) -> None:
         
         analysis_df = pd.merge(total_orders_by_company, slow_by_company, on='company', how='left').fillna(0)
         
-        # Применяем фильтр по минимальному количеству заказов
         analysis_df_filtered = analysis_df[analysis_df['total_orders'] >= min_total_orders].copy()
         
         if not analysis_df_filtered.empty:
             analysis_df_filtered['slow_orders_percent'] = (analysis_df_filtered['slow_orders_count'] / analysis_df_filtered['total_orders'] * 100)
             
-            st.info(f"Анализ компаний с **{min_total_orders}** и более заказами. Найдено **{len(slow_orders_df)}** медленных заказов (дольше {q3_arrival_time} мин).")
+            st.info(f"Analysis of companies with **{min_total_orders}** or more orders. Found **{len(slow_orders_df)}** slow orders (longer than {q3_arrival_time:.1f} min).")
             
-            st.markdown("##### Доля медленных заказов по компаниям")
+            st.markdown("##### Slow Order Rate by Company")
             chart_slow_company = alt.Chart(analysis_df_filtered.sort_values('slow_orders_percent', ascending=False).head(15)).mark_bar().encode(
-                x=alt.X('slow_orders_percent:Q', title='% медленных заказов'),
-                y=alt.Y('company:N', title='Компания', sort='-x'),
+                x=alt.X('slow_orders_percent:Q', title='% of Slow Orders'),
+                y=alt.Y('company:N', title='Company', sort='-x'),
                 tooltip=['company', 'slow_orders_count', 'total_orders', alt.Tooltip('slow_orders_percent:Q', format='.1f')]
             )
             st.altair_chart(chart_slow_company, use_container_width=True)
-            with st.expander("Посмотреть детали анализа"):
+            with st.expander("View Analysis Details"):
                 st.dataframe(analysis_df_filtered)
         else:
-            st.warning(f"Нет компаний с {min_total_orders} и более заказами для анализа.")
+            st.warning(f"No companies with {min_total_orders} or more orders to analyze.")
 
-    # --- Анализ по времени суток ---
+    # --- Analysis by Hour of Day ---
     st.markdown("---")
     st.markdown("### Analysis by Hour of Day")
-    sort_order = list(range(6, 24)) + list(range(0, 6)) # Сортировка с 6 утра
+    sort_order = list(range(6, 24)) + list(range(0, 6))
 
     if "orderdate1" in orders.columns:
         st.markdown("#### Orders and Median Arrival Time by Hour")
@@ -253,12 +293,12 @@ def show(data: dict, filters: dict) -> None:
         st.altair_chart(alt.layer(bar, line).resolve_scale(y='independent'), use_container_width=True)
 
     if not grouped_cancels.empty and "session_start_time" in grouped_cancels.columns:
-        st.markdown("#### Cancels, Median Wait Time by Hour")
+        st.markdown("#### Cancels, Median & Total Wait Time by Hour")
         grouped_cancels['hour'] = pd.to_datetime(grouped_cancels['session_start_time']).dt.hour
         cancels_by_hour = grouped_cancels.groupby('hour').agg(
             cancel_session_count=('hour', 'size'),
-            median_wait_sec=('total_wait_sec', 'median')
-            # total_wait_min=('total_wait_sec', lambda x: x.sum() / 60)
+            median_wait_sec=('total_wait_sec', 'median'),
+            total_wait_min=('total_wait_sec', lambda x: x.sum() / 60)
         ).reset_index()
 
         base_cancel = alt.Chart(cancels_by_hour).encode(x=alt.X('hour:O', title='Hour of Day', sort=sort_order))
